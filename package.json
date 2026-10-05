@@ -1,0 +1,158 @@
+{
+  "name": "dsh-multi-git-repo-manager",
+  "version": "0.1.2",
+  "description": "Shared Git repository and non-Git directory management for DeepSeek Harness plugins.",
+  "keywords": [
+    "deepseek-harness",
+    "dsh-plugin",
+    "git",
+    "multi-repository"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wuqingzhong2020/dsh-multi-git-repo-manager.git"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./lib/types/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./remote": {
+      "types": "./lib/types/remote.d.ts",
+      "default": "./lib/remote.js"
+    },
+    "./typert": {
+      "types": "./lib/types/typert.host.d.ts",
+      "default": "./lib/typert.host.js"
+    },
+    "./types": {
+      "types": "./lib/types/repository-types.d.ts",
+      "default": "./lib/repository-types.js"
+    },
+    "./workspace": {
+      "types": "./lib/types/repository-workspace.d.ts",
+      "default": "./lib/repository-workspace.js"
+    },
+    "./schemas": {
+      "types": "./lib/types/repository-schemas.d.ts",
+      "default": "./lib/repository-schemas.js"
+    },
+    "./project-file": {
+      "types": "./lib/types/repository-project-file.d.ts",
+      "default": "./lib/repository-project-file.js"
+    },
+    "./settings": {
+      "types": "./lib/types/repository-settings.d.ts",
+      "default": "./lib/repository-settings.js"
+    },
+    "./directory": {
+      "types": "./lib/types/repository-directory.d.ts",
+      "default": "./lib/repository-directory.js"
+    },
+    "./paths": {
+      "types": "./lib/types/client/repository-paths.d.ts",
+      "default": "./lib/client/repository-paths.js"
+    },
+    "./settings-model": {
+      "types": "./lib/types/client/repository-settings-model.d.ts",
+      "default": "./lib/client/repository-settings-model.js"
+    },
+    "./directory-picker": {
+      "types": "./lib/types/client/directory-picker.d.ts",
+      "default": "./lib/client/directory-picker.js"
+    },
+    "./events": {
+      "types": "./lib/types/client/repository-events.d.ts",
+      "default": "./lib/client/repository-events.js"
+    },
+    "./package.json": "./package.json",
+    "./desktop-picker-adapter": "./scripts/patch-desktop-directory-picker.mjs"
+  },
+  "files": [
+    "lib/**/*.js",
+    "lib/client.js.map",
+    "lib/types/**/*.d.ts",
+    "cordis.patch.yml",
+    "scripts/patch-desktop-directory-picker.mjs",
+    "README.md",
+    "README.en.md",
+    "docs/"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-primitives",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-sidebar-right"
+      ],
+      "platform": "web"
+    }
+  },
+  "scripts": {
+    "build": "node scripts/clean-lib.mjs && tsc --emitDeclarationOnly --outDir lib/types && tsdown",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/*.test.mjs",
+    "test:pack": "node scripts/verify-pack.mjs"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.4",
+    "@deepseek-ai/dsh-agent": ">=0.2.0 || 0.2.0-rc.2",
+    "@deepseek-ai/dsh-api-remotes": ">=0.2.0 || 0.2.0-rc.2",
+    "@deepseek-ai/dsh-api-session-controller": ">=0.2.0 || 0.2.0-rc.2",
+    "@deepseek-ai/dsh-atomic-write": ">=0.2.0 || 0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-locale": ">=0.2.0 || 0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-conversation": ">=0.2.0 || 0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-primitives": ">=0.2.0 || 0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-slots": ">=0.2.0 || 0.2.0-rc.2",
+    "@deepseek-ai/dsh-session": ">=0.2.0 || 0.2.0-rc.2",
+    "@deepseek-ai/dsh-settings": ">=0.2.0 || 0.2.0-rc.2",
+    "@deepseek-ai/dsh-typert-protocol": ">=0.2.0 || 0.2.0-rc.2",
+    "@deepseek-ai/dsh-typert-registry": ">=0.2.0 || 0.2.0-rc.2",
+    "@deepseek-ai/schemastery": "^3.18.4",
+    "react": "^18.2.0",
+    "@deepseek-ai/dsh-client-ui-renderer": ">=0.2.0 || 0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-sidebar-right": ">=0.2.0 || 0.2.0-rc.2"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.4",
+    "@deepseek-ai/dsh-agent": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-api-remotes": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-api-session-controller": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-atomic-write": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-locale": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-conversation": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-primitives": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-slots": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-session": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-settings": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-typert-protocol": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-typert-registry": "0.2.0-rc.2",
+    "@deepseek-ai/schemastery": "3.18.4",
+    "react": "^18.2.0",
+    "@types/node": "^24.0.0",
+    "@types/react": "~18.3.1",
+    "lightningcss": "^1.32.0",
+    "tsdown": "^0.22.14",
+    "typescript": "^5.9.0",
+    "@deepseek-ai/dsh-client-ui-renderer": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-sidebar-right": "0.2.0-rc.2"
+  }
+}
