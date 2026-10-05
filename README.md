@@ -1,50 +1,136 @@
 # dsh-multi-git-repo-manager
 
-已支持 Git 仓库与非 Git 目录统一管理、类型转换提示、容器直接子目录发现和按文件路径的权威归属。v1/v2 配置、迁移备份与扩展 API 见 [统一目录管理](docs/MANAGED_TARGETS.md)。
-
-本轮类型检查、构建、自动测试、双包联装及指定 Desktop 的实际验证见 [实施验证记录](docs/NON_GIT_VERIFICATION.md)。
-
 [简体中文](README.md) | [English](README.en.md)
 
-当前版本：**v0.1.2**。DeepSeek Harness 的公共多 Git 仓库管理插件。
+当前版本：**v0.1.3**。
 
-本插件从 `dsh-file-review-tab-Multi-git-repository` 提取多仓库管理能力，独立提供右侧原生「多代码仓管理」Tab、工程配置、仓库解析及会话内临时仓库。其他插件通过同一个 `multiGitRepoManager` 服务取得工作区和可信根目录。
+Host 服务与 Remote 命名空间为 `multiGitRepoManagerByWqz`，配套审查服务为 `multiGitFileReviewByWqz`。消费者可从 `dsh-multi-git-repo-manager/service-names` 导入稳定标识；升级时同步更新审查插件，工程配置文件和 Profile 配置继续沿用。
 
-进入工程会话，打开右侧栏，在「开始」页点击「多代码仓管理」。也可通过右侧新标签页的开始页面打开。管理页与「文件审查」使用同一套原生 Tab 机制，支持切换、分栏与全屏；切换 Tab 时保留未保存的表单。会话顶部原管理页签已移除。
+**DeepSeek Harness 的公共 Git 仓库与非 Git 目录管理插件。** 从 [dsh-file-review-tab-Multi-git-repository](https://github.com/wuqingzhong2020/dsh-file-review-tab-Multi-git-repository) 提取公共管理能力，独立提供右侧原生「多代码仓管理」Tab。未来需要管理多个代码目录的插件可以共用工程配置、目标发现和文件归属，不必各自维护一套管理逻辑。
+
+管理插件可独立运行。文件审查消费者 **v0.3.4** 精确依赖本插件 **0.1.3**；使用文件审查时需要同时安装并启用两个插件。差异计算、评论、确认和撤销／重做由消费者负责。本次拆分没有修改 `D:\projectZJGG\ref\dsh-file-review`。
+
+## 使用文档
+
+首次使用请阅读 [中文使用手册](docs/USER_GUIDE.md) 或 [English user guide](docs/USER_GUIDE.en.md)，其中说明原生 Tab 入口、类型选择、目录发现、保存、重载、临时目标和常见问题，并配有实际 Desktop 截图。
+
+![实际 Desktop 中的多代码仓管理 Tab](docs/image/manager-after-restart.png)
+
+进入工程会话，打开右侧栏，从「开始」页点击 **多代码仓管理**。右侧「+」打开的新标签页同样提供此入口；管理页支持切换、分栏和全屏，切换 Tab 时保留未保存表单。原会话顶部的管理页签已移除。当前管理页未提供单独的「操作指南」按钮，手册从本 README 打开。
+
+## 开发文档
+
+开发或排查问题前，请阅读 [架构与接入说明](docs/ARCHITECTURE.md) 和 [统一目录模型与接口](docs/MANAGED_TARGETS.md)。后者说明 v1/v2 配置、目标状态、发现边界和按文件路径的权威归属。
+
+发布维护者另请阅读 [公开发布与插件市场收录](docs/RELEASING.md)。历史变化见 [版本记录](docs/releases/version.md)，实际检查与验证边界见 [非 Git 目录实施记录](docs/NON_GIT_VERIFICATION.md) 和 [早期 Desktop 验证记录](docs/DESKTOP_VERIFICATION.md)。
 
 ## 功能
 
-- 增加、编辑、删除仓库条目，重新加载和保存当前工程配置；删除条目不会删除磁盘目录。
-- 工程内仓库保存相对路径；工程外仓库只在当前会话临时使用，不保存机器绝对路径。
-- 识别普通 Git 根目录和 worktree 的 `.git` 文件，预览不存在、非 Git、错误和可用状态。
-- 查找当前目录及其父目录的工程配置，匹配 Profile 中的工程索引，导入 JSON、INI 和 `.gitmodules` 清单。
-- 支持启停多仓库范围、是否包含工程根目录、仓库去重、嵌套路径归属、目录选择及中英文切换。
-- 宿主验证真实路径、项目身份和文件修订，使用原子写入保存配置；临时仓库按会话隔离。
+- **Git 与普通目录统一管理**：添加、命名、编辑和移除两类目标，分别显示 Git、非 Git 目录和不可用数量。移除条目只改变配置，不删除磁盘目录。
+- **右侧原生 Tab**：使用宿主 `sidebarRightTabs` 及正文／标题插槽，无需第三方侧栏插件；隐藏和切换 Tab 保留当前表单，窄侧栏按容器宽度调整布局。
+- **工程级配置**：启停多目标范围、选择是否包含工程根目录，将内部目标保存到 `dsh-file-review-repositories.json`。可从工程子目录自动找到最近的配置文件。
+- **v1/v2 兼容**：Git-only 旧配置可继续使用；新增普通目录或发现容器时写入 v2，并在首次升级时保留原始 v1 文件的 `.v1.bak`。
+- **直接子目录发现**：使用可配置容器，例如 `project`、`project/plugins`；预览只产生候选，逐项添加并保存后才纳管，容器本身不会自动加入。
+- **自身类型与状态检查**：识别 Git 根目录和 worktree 的 `.git` 文件；普通目录无自身 Git 时可用，类型不匹配、路径缺失或损坏元数据保留诊断。
+- **会话临时目标**：工程外 Git 仓与普通目录使用绝对路径，仅当前会话有效，不写入项目 JSON；Agent 释放、插件卸载或进程重启会清理临时条目。
+- **公共文件归属**：最深目标优先，不可用子目标、未知子仓和未纳管组件会阻断父目录兜底；通过真实路径复核链接、元数据路径和待创建文件。
+- **旧清单迁移**：解析旧 JSON、INI 和 `.gitmodules` 配置，匹配 Profile 工程索引，供用户主动迁移；旧索引本身不会隐式启用额外范围。
+- **保存与联动**：校验当前工程身份和项目文件哈希，原子写入并拒绝陈旧保存；配置变更通知连接独立构建的插件 bundle，消费者重新获取工作区。
+- **宿主语言与目录选择**：跟随宿主中文／English 实时切换，保留用户输入；「打开」使用宿主目录选择服务，并将工程内目录转换为相对路径。
 
-## 安装和兼容
+## 安装
 
-构建后得到 `dist/dsh-multi-git-repo-manager-0.1.2.tgz`。在 Desktop 的插件页安装并启用这个包；使用文件审查时，同时安装并启用 `dsh-file-review-tab-multi-git-repository`。
+目标接口为 **DSH 正式版 >=0.2.0**，同时保留 **0.2.0-rc.2** 测试通道。实际验证使用 Windows 的 `D:\app\DeepSeekHarnessDesktop\DeepSeek Harness.exe`，宿主为 0.2.0-rc.2。正式版／较新稳定版、完整 Web 宿主和其他平台尚未完成实际验证；声明的接口范围不等于全部平台均已验收。
 
-**DSH 的 npm 依赖安装与插件启用是两件事。** 当前 DSH 0.2 的 Profile 只加载 `dsh.profile.bundles` 中选中的插件。只安装审查插件的 npm 依赖不会自动选中管理插件；需要同时选中两个插件，`multiGitRepoManager` 服务才能启动。管理插件不需要文件审查插件即可独立运行。
+本地构建产物为 `dist/dsh-multi-git-repo-manager-0.1.3.tgz` 及 `.sha256`。维护者可交付本地包，公开安装则在 [GitHub Release](https://github.com/wuqingzhong2020/dsh-multi-git-repo-manager/releases) 上传同名资产后提供下载；本仓库的验证记录是本地交付记录，不代表已发布 Release。
 
-面向独立 Web Profile 的本地包安装示例：
+### DeepSeek Harness Desktop
+
+完全退出 Desktop，包括托盘进程，再在 PowerShell 中安装。将示例路径替换为实际下载或构建位置：
 
 ```powershell
-dsh plugin --profile web add .\dist\dsh-multi-git-repo-manager-0.1.2.tgz
+pnpm --dir "$env:USERPROFILE\.dsh\profiles\desktop" add "D:\Downloads\dsh-multi-git-repo-manager-0.1.3.tgz"
 ```
 
-本版本为兼容旧工程，继续使用 **`dsh-file-review-repositories.json`**（读取格式版本 1 / 2）。现有配置无需改名或重建；未来插件应读取本服务，而不是自行实现另一份配置。旧审查插件的 Profile 工程索引由消费者导入，保存时写入管理插件自己的设置空间。
+使用配套文件审查时，可同时安装两个本地包：
 
-Desktop 起始目录选择的兼容适配脚本已归本插件所有。旧版 Desktop 缺少 `supportsDefaultPath` 时，需按旧适配流程关闭 Desktop 后运行 `scripts/patch-desktop-directory-picker.mjs <resources/app.asar>`；本插件安装和测试不会自动修改 Desktop。Web 使用宿主可用的目录选择服务。
+```powershell
+pnpm --dir "$env:USERPROFILE\.dsh\profiles\desktop" add "D:\Downloads\dsh-multi-git-repo-manager-0.1.3.tgz" "D:\Downloads\dsh-file-review-tab-multi-git-repository-0.3.4.tgz"
+```
 
-`D:\projectZJGG\ref\dsh-file-review` 暂未接入本插件。
+重新启动后，在「插件」页确认所需插件已启用，并从右侧开始页打开管理 Tab。**安装与启用是两件事**：DSH 0.2 只加载 `dsh.profile.bundles` 中选中的插件，安装 npm 依赖本身不会自动加载管理服务。管理插件可单独启用；使用审查消费者时两者均须启用。
+
+同版本重新构建时，pnpm 可能复用同路径本地包。先将 tgz 复制为包含 SHA256 摘要的新文件名，再安装该路径；安装后核对 Profile 中 Host／Client 文件与构建的哈希。仅看到版本号 0.1.3，不能证明使用了最新构建。
+
+### 独立 Web Profile
+
+在管理仓库根目录，用已有本地包安装：
+
+```sh
+dsh plugin --profile web add ./dist/dsh-multi-git-repo-manager-0.1.3.tgz
+```
+
+公开 Release 和同名资产准备完成后，可使用固定版本 URL：
+
+```sh
+dsh plugin --profile web add https://github.com/wuqingzhong2020/dsh-multi-git-repo-manager/releases/download/v0.1.3/dsh-multi-git-repo-manager-0.1.3.tgz
+```
+
+使用审查功能仍需安装并启用对应消费者；没有热重载时重启 `dsh web`。当前默认交付预构建 tgz。源码仓库安装对 `lib/` 的要求见 [发布指南](docs/RELEASING.md)，完整 Web 运行尚未实测。
+
+### Desktop 目录选择起始路径适配
+
+Desktop 0.2.0-rc.2 的原生目录选择接口缺少起始路径能力。若希望「打开」从填写的路径定位，可在完全退出 Desktop 后运行本包的兼容脚本；安装目录不同时修改第二个参数：
+
+```powershell
+node "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\dsh-multi-git-repo-manager\scripts\patch-desktop-directory-picker.mjs" "D:\app\DeepSeekHarnessDesktop\resources\app.asar"
+```
+
+脚本保留来源与窗口校验，在原文件旁生成 `app.asar.dsh-directory-picker-*.bak`；不匹配的宿主构建会停止，重复运行可识别已有适配。安装 tgz 不会自动修改 Desktop；宿主更新后需重新检查适配。此脚本现归管理插件维护，消费者只保留兼容转发入口。
+
+## 配置工程
+
+1. 在目标工程的会话中，从右侧「开始」页打开「多代码仓管理」。工程目录和项目名称由会话确定，只读显示。
+2. 点击 **添加仓库或目录**，选择 **Git** 或 **非 Git 目录**，填写名称与路径，或用 **打开** 选择目录。
+3. 选择是否启用多目标管理、是否包含工程根目录。没有项目文件时，点击 **生成新配置文件**；已有文件时点击 **保存配置**。
+4. 检查下方两类目标的数量、来源和状态。直接编辑磁盘 JSON 后，点击 **重新加载已保存配置**；重载会用保存内容替换当前表单。
+
+启用工程根目录时，根目录按自身元数据自动分类。工程根不是 Git 时，它会成为普通目录；其下独立 Git 子仓仍作为更深目标分别管理。只管理指定子目标时取消根目录选项。
+
+### 配置示例与迁移
+
+文件名继续使用 **`dsh-file-review-repositories.json`**，现有工程无需改名。包含普通目录与发现容器的 v2 示例：
+
+```json
+{
+  "version": 2,
+  "enabled": true,
+  "includeProjectRoot": false,
+  "repositories": [{ "name": "Core", "path": "core" }],
+  "directories": [
+    { "name": "LocalComponent", "path": "project/LocalComponent" },
+    { "name": "LocalPlugin", "path": "project/plugins/LocalPlugin" }
+  ],
+  "discovery": { "containers": ["project", "project/plugins"] }
+}
+```
+
+Git 条目放在 `repositories`，普通目录放在 `directories`。工程根从配置文件位置推导，不写入机器绝对根路径。旧 v1 的 Git 配置继续可用；首次保存普通目录或发现容器时升级 v2，并保留原字节的 `.v1.bak`，已有备份不覆盖。升级后继续写 v2；未知字段、未来版本或陈旧文件修订会拒绝覆盖。
+
+### 发现与临时目标
+
+在发现容器中每行填写一个工程内路径，点击 **预览发现结果**。只检查直接子目录，逐项点击 **添加到列表** 后还需保存；容器本身不自动纳管，嵌套容器避免重复列为候选。
+
+工程内目标保存相对路径；工程外目标，包括父目录、兄弟目录、跨盘目录和逃出工程的目录联接，须显式作为当前会话临时目标使用，路径为绝对路径，不写入 JSON。先生成工程配置，才能添加临时目标。移除条目只移除配置或会话引用，插件不会 clone、pull、初始化 Git 或删除源码。
+
+配置限制为 **1 MiB、512 个目标、32 个发现容器**。具体状态、路径规则和排查步骤见 [使用手册](docs/USER_GUIDE.md)。
 
 ## 供其他插件复用
 
 在消费者的 `package.json` 中声明必需的共享插件依赖，固定版本并由宿主安装同一个实例：
 
 ```json
-{ "peerDependencies": { "dsh-multi-git-repo-manager": "0.1.2" } }
+{ "peerDependencies": { "dsh-multi-git-repo-manager": "0.1.3" } }
 ```
 
 宿主通过 Cordis 注入服务：
@@ -54,26 +140,59 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type {} from 'dsh-multi-git-repo-manager'
 
-export const inject = ['multiGitRepoManager']
+export const inject = ['multiGitRepoManagerByWqz']
 export function apply(ctx: Context) {
-  const workspaceFor = (agent: Agent) => ctx.multiGitRepoManager.workspace(agent)
-  // 把 workspaceFor 传给当前插件需要仓库范围的功能。
+  const workspaceFor = (agent: Agent) => ctx.multiGitRepoManagerByWqz.workspace(agent)
+  const managedFile = async (agent: Agent, path: string) => {
+    const [result] = await ctx.multiGitRepoManagerByWqz.resolveTargetPaths(agent, [path])
+    if (result?.state !== 'managed') throw new Error(result?.reason ?? 'File has no managed owner')
+    return result
+  }
+  // 将两者接入消费者已有服务；实际文件操作前重新调用 managedFile。
 }
 ```
 
-浏览器从当前会话获取 `scope.get('remote.multiGitRepoManager')`，调用 `workspace()`、`project()`、`saveProject(request)`、`setTemporaryTargets(entries)`、`resolveTargetPaths(paths)`、`discoverTargets(project)` 或 `directoryStart(path)`；旧 `setTemporaryRepositories(entries)` 保留为 Git 专用兼容接口。先检查返回值的 `ok`，再读取 `value` 或 `error.message`。Remote 的挂载及管理页签由本插件负责，消费者不应重复注册。
+`workspace.targets` 是 Git 与普通目录的统一结果，`repositories` 是旧接口的 Git 投影。`roots` 仅用于粗范围展示，不能单独授权文件操作。消费者应通过 `resolveTargetPaths` 确认具体文件处于 `managed` 状态，读取、定位或写入前按当前会话重新复核；Git 功能只使用可用且 `capabilities.git` 为真的目标。
+
+浏览器从 `sessions.scope(sessionId)?.get('remote.multiGitRepoManagerByWqz')` 获取当前会话的 Remote，先检查返回值 `ok`，再读取 `value` 或 `error.message`。会话作用域已经绑定 Agent，以下调用不再传入客户端自选的工程根或 Agent：
+
+| 调用 | 返回及用途 |
+| --- | --- |
+| `workspace()` | 当前有效工作区、目标、边界及修订 |
+| `project()` | 表单配置、配置状态、文件修订与会话临时目标 |
+| `saveProject(request)` | 带 `project`、`revision`、`fileRevision` 的保存，返回更新后的表单 |
+| `discoverTargets(project)` | 当前工程草稿的发现候选与警告，不自动启用候选 |
+| `resolveTargetPaths(paths)` | 具体文件归属；最多 4096 个输入 |
+| `setTemporaryTargets(entries)` | 替换当前会话的工程外目标集合；条目含 `name`、`path`、`kind` |
+| `setTemporaryRepositories(entries)` | 旧 Git 专用兼容调用，保留已设置的普通目录临时目标 |
+| `directoryStart(path)` | 根据当前工程与行路径取得目录选择起点 |
 
 | 导出 | 用途 |
 | --- | --- |
 | 主入口 | `MultiGitRepoManager`、`RepositorySettings`、插件 `apply/Config/inject`、宿主路径及配置工具 |
-| `/types` | `RepositoryProject`、`NamedRepository`、`RepositoryWorkspace` 等类型；保留旧 `Review*` 类型别名兼容消费者 |
-| `/workspace`、`/project-file`、`/schemas` | 工作区解析、配置读写、协议校验 |
-| `/paths` | 浏览器路径转换、仓库归属与相对路径显示 |
+| `/types` | `ManagedTarget`、`NamedManagedTarget`、`TargetPathResolution`、`RepositoryProject` 等类型；保留旧 `Review*` 名称兼容消费者 |
+| `/workspace`、`/project-file`、`/schemas`、`/settings` | 工作区解析、配置读写、协议校验和 Profile 索引 |
+| `/paths` | 浏览器路径转换、展示匹配与相对路径显示；不代替 Host 权威归属 |
 | `/events` | `subscribeRepositories`、`repositoriesChanged`，跨独立插件 bundle 的变更通知 |
+| `/service-names` | Host 服务名与会话 Remote 命名空间常量，不依赖宿主运行时 |
 | `/settings-model`、`/directory-picker`、`/directory` | 草稿转换、浏览器目录选择和宿主起始目录验证 |
 | `/remote`、`/typert` | DSH Typert 声明和严格会话协议 |
 
-消费者浏览器 bundle 可打包 `/paths` 和 `/events` 等纯工具，并订阅配置变化后重新获取工作区。事件总线通过浏览器共享事件目标连接独立 bundle；它不是磁盘文件监听器。手动修改 JSON 后，仍需点击重新加载。
+消费者可打包 `/paths`、`/events` 等纯浏览器工具，订阅通知后重新获取工作区；它们不依赖 Node 文件系统。事件总线连接独立 bundle，不是磁盘监听器。服务、Remote namespace 和管理 Tab 由本插件注册，消费者只注册自己的业务界面。完整边界见 [接入约定](docs/MANAGED_TARGETS.md#接入约定)。
+
+## 常见问题
+
+| 现象 | 检查方式 |
+| --- | --- |
+| 已安装但没有管理入口 | 确认当前 Profile 启用本插件、会话有工程目录，并在右侧开始页寻找入口；完整重启核对 Host／Client 加载 |
+| 表单可以预览，却没有多目标审查 | 尚未生成并启用项目文件；旧 Profile 索引和发现候选只是预览 |
+| 目录在父 Git 仓内却显示非 Git | 类型按该目录自身元数据判定；无独立 Git 的组件应选择普通目录 |
+| 状态为类型不匹配 | 核对目录是否出现自身 Git 元数据，显式调整类型并保存 |
+| 保存时提示配置已变化 | 先保留需要的草稿，再重新加载并合并修改；不要覆盖他人的文件修订 |
+| 外部路径没有写入 JSON | 外部目标是会话临时数据；改为工程内路径才能随项目持久化 |
+| 手工修改文件后消费者未刷新 | 管理通知不是文件系统监听，需重新加载配置 |
+
+审查插件中的 **全部非 Git 目录** 是汇总筛选，`名称（非 Git 目录）` 是单个目标；两者不是两个重复的配置条目。普通目录支持哪些业务由消费者决定，管理插件本身不提供 Git 差异或手工编辑基线。
 
 ## 开发与验证
 
@@ -81,9 +200,28 @@ export function apply(ctx: Context) {
 
 ```powershell
 pnpm install --frozen-lockfile
+pnpm typecheck
 pnpm build
 pnpm test
 pnpm test:pack
 ```
 
-消费者的 `pnpm-workspace.yaml` 仅在本地开发时把 `0.1.2` 指向相邻管理插件目录；发布包仍声明精确版本 `0.1.2`，不包含本地链接。发布时先交付管理插件，再交付消费者。发布步骤与边界见 [架构与发布说明](docs/ARCHITECTURE.md)。
+部分测试直接读取源码，另一些加载 `lib/`，功能修改后先构建再测试。Git 集成测试需要 PATH 中的 `git`，链接测试需要临时目录支持目录链接。测试使用临时工程，不依赖维护者真实工程路径。`test:pack` 生成 tgz 和 SHA256，并检查 exports、内部模块及归档内容。
+
+消费者的 `pnpm-workspace.yaml` 仅在本地开发时把 `0.1.3` 指向相邻管理仓库，发布包仍声明精确版本。先构建并交付管理插件，再构建消费者。管理插件不反向依赖审查插件。
+
+已有验证包括管理插件 **49 项 Node 测试**、配套审查 **172 项 Node 测试**、**8 项双 bundle 浏览器测试**与隔离包联装。实际指定 Desktop 完成普通目录发现、v2 保存与备份、范围切换和退出重启；混合工具轮次等只由自动测试覆盖。证据和具体限制见 [实施验证记录](docs/NON_GIT_VERIFICATION.md)，不能据此推定未测试平台也已通过。
+
+## 公开发布与插件市场收录
+
+当前采用 GitHub 源码仓库与预构建 Release tgz 交付，npm 发布为可选步骤。市场收录使用独立条目，和源码推送、Release 上传分别进行；先准备可安装产物，再按社区当前的 [贡献指南](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/blob/main/contributing.md) 提交收录。
+
+本仓库提供 [发布指南](docs/RELEASING.md)、[v0.1.3 版本说明](docs/releases/version.md#v012) 与 [市场 YAML 模板](docs/market/wuqingzhong2020__dsh-multi-git-repo-manager.yml)。这些文件是维护资料，不表示已经推送、发布或收录。
+
+## 致谢
+
+公共管理能力来自本作者维护的 [dsh-file-review-tab-Multi-git-repository](https://github.com/wuqingzhong2020/dsh-file-review-tab-Multi-git-repository) 拆分。本插件使用 DSH 的 Cordis、Typert 和原生侧栏接口，审查业务继续由相应消费者维护。
+
+## 许可证
+
+[MIT](LICENSE)

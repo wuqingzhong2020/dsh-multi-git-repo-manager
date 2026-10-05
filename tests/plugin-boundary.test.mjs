@@ -20,7 +20,7 @@ test('the standalone plugin reads volatile config and registers a shared session
   try {
     const root = await realpath(directory)
     await ctx.plugin(manager, { projects: [project(root, 'Manager')] }).await()
-    const service = ctx.get('multiGitRepoManager')
+    const service = ctx.get('multiGitRepoManagerByWqz')
     assert.ok(service)
     service.adoptLegacyProjects([project(root, 'Legacy')])
     const page = await service.project({ id: 'session', session: { header: { cwd: root } } })
@@ -63,8 +63,8 @@ test('legacy Profile indexes merge into the manager namespace with manager value
 test('the manager protocol owns repository and target operations with strict session lookup', () => {
   assert.deepEqual(REPOSITORY_INVOCATIONS.map(d => d.method), ['setTemporaryTargets', 'resolveTargetPaths', 'discoverTargets', 'directoryStart', 'workspace', 'project', 'saveProject', 'setTemporaryRepositories'])
   for (const descriptor of REPOSITORY_INVOCATIONS) {
-    assert.equal(descriptor.service, 'multiGitRepoManager')
-    assert.equal(descriptor.namespace, 'multiGitRepoManager')
+    assert.equal(descriptor.service, 'multiGitRepoManagerByWqz')
+    assert.equal(descriptor.namespace, 'multiGitRepoManagerByWqz')
     assert.deepEqual(descriptor.scope, { context: 'agent', wire: 'agentId' })
     assert.equal(descriptor.parameters[0].lookup, 'agent')
   }
@@ -151,7 +151,7 @@ test('the standalone browser bundle mounts the manager namespace and owns one na
   assert.equal(definition.title(), 'Multi-repository management')
   assert.equal(definition.guide[0].title(), 'Multi-repository management')
   assert.equal(mounts[0].package, 'dsh-multi-git-repo-manager')
-  assert.ok(mounts[0].descriptors.every(d => d.namespace === 'multiGitRepoManager'))
+  assert.ok(mounts[0].descriptors.every(d => d.namespace === 'multiGitRepoManagerByWqz'))
   h.release()
   await Promise.resolve()
   assert.equal(types.size, 0)

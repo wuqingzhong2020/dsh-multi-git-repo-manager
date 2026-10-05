@@ -1,6 +1,6 @@
 {
   "name": "dsh-multi-git-repo-manager",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Shared Git repository and non-Git directory management for DeepSeek Harness plugins.",
   "keywords": [
     "deepseek-harness",
@@ -74,7 +74,11 @@
       "default": "./lib/client/repository-events.js"
     },
     "./package.json": "./package.json",
-    "./desktop-picker-adapter": "./scripts/patch-desktop-directory-picker.mjs"
+    "./desktop-picker-adapter": "./scripts/patch-desktop-directory-picker.mjs",
+    "./service-names": {
+      "types": "./lib/types/service-names.d.ts",
+      "default": "./lib/service-names.js"
+    }
   },
   "files": [
     "lib/**/*.js",

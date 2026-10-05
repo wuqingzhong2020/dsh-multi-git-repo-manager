@@ -1,3 +1,4 @@
+import { MULTI_GIT_REPO_MANAGER_REMOTE_NAMESPACE } from '../service-names.ts'
 import { useEffect, useRef, useState } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
@@ -46,7 +47,7 @@ async function unwrapProjectResult<T>(promise: Promise<RemoteResult<T>>): Promis
 export function useRepositorySettings(ctx: Context, sessionId: string) {
   const sessions = (ctx as Context & { sessions: ISessions }).sessions
   const projectService = (): ProjectRemote => {
-    const service = sessions.scope(sessionId as SessionId)?.get('remote.multiGitRepoManager') as
+    const service = sessions.scope(sessionId as SessionId)?.get(MULTI_GIT_REPO_MANAGER_REMOTE_NAMESPACE) as
       | ProjectRemote
       | undefined
     if (service === undefined) throw new Error(t('remoteUnavailable'))

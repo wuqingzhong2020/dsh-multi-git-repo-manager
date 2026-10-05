@@ -52,7 +52,7 @@ export function cssModulesPlugin() {
 
 const config: UserConfig[] = [{
   name: PACKAGE_NAME,
-  entry: ['src/index.ts', 'src/typert.host.ts', 'src/remote.ts', 'src/repository-types.ts', 'src/repository-workspace.ts', 'src/repository-schemas.ts', 'src/repository-project-file.ts', 'src/repository-directory.ts', 'src/repository-settings.ts', 'src/client/repository-paths.ts', 'src/client/repository-settings-model.ts', 'src/client/directory-picker.ts', 'src/client/repository-events.ts'],
+  entry: ['src/index.ts', 'src/service-names.ts', 'src/typert.host.ts', 'src/remote.ts', 'src/repository-types.ts', 'src/repository-workspace.ts', 'src/repository-schemas.ts', 'src/repository-project-file.ts', 'src/repository-directory.ts', 'src/repository-settings.ts', 'src/client/repository-paths.ts', 'src/client/repository-settings-model.ts', 'src/client/directory-picker.ts', 'src/client/repository-events.ts'],
   outDir: 'lib',
   format: 'esm',
   platform: 'node',

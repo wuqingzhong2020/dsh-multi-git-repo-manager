@@ -9,7 +9,7 @@ await mkdir('dist', { recursive: true })
 const npm = execFileSync(process.platform === 'win32' ? 'where.exe' : 'which', ['npm'], { encoding: 'utf8' }).trim().split(/\r?\n/)[0].replace(/npm(?:\.cmd)?$/, 'node_modules/npm/bin/npm-cli.js')
 const packed = JSON.parse(execFileSync(process.execPath, [npm, 'pack', '--json', '--pack-destination', 'dist'], { encoding: 'utf8' }))[0]
 const files = new Set(packed.files.map(file => file.path))
-assert.equal(pkg.version, '0.1.2')
+assert.equal(pkg.version, '0.1.3')
 for (const target of Object.values(pkg.exports)) {
   for (const path of typeof target === 'string' ? [target] : Object.values(target)) {
     assert.ok(files.has(path.replace(/^\.\//, '')), `Missing export: ${path}`)

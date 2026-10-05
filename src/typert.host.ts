@@ -1,3 +1,4 @@
+import { MULTI_GIT_REPO_MANAGER_SERVICE_NAME } from './service-names.ts'
 /** Host Typert contribution discovered through the package's `./typert` export. */
 
 import type { TypertContribution } from '@deepseek-ai/dsh-typert-registry/types'
@@ -10,7 +11,7 @@ export const TYPERT: TypertContribution = {
   invocations: REPOSITORY_INVOCATIONS,
   model: {
     services: [{
-      key: 'multiGitRepoManager',
+      key: MULTI_GIT_REPO_MANAGER_SERVICE_NAME,
       exportName: 'MultiGitRepoManager',
       summary: 'Manage shared project repositories and resolve trusted session roots.',
       tags: [],

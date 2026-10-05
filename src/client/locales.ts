@@ -1,4 +1,4 @@
-export const LOCALE_NS = 'multiGitRepoManager'
+export const LOCALE_NS = 'multiGitRepoManagerByWqz'
 export const zh = {
   remoteUnavailable: '多代码仓管理服务不可用',
   stateError: '错误',

@@ -22,3 +22,5 @@ export function apply(ctx: Context, config: MultiGitRepoManagerConfig): void {
   const projects = Array.isArray(config?.projects) ? config.projects : config?.projects?.get() ?? []
   new MultiGitRepoManager(ctx, new RepositorySettings(ctx, reviewProjectSchema.array().parse(projects)))
 }
+
+export * from './service-names.ts'

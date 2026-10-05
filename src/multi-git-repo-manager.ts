@@ -1,3 +1,4 @@
+import { MULTI_GIT_REPO_MANAGER_SERVICE_NAME } from './service-names.ts'
 /** Shared session-scoped repository management; never executes Git mutations. */
 import { realpath } from 'node:fs/promises'
 import { basename, isAbsolute } from 'node:path'
@@ -28,13 +29,13 @@ export function sessionCwd(agent: Agent): string {
 const agentKey = (agent: Agent) => String(agent.id)
 
 declare module '@deepseek-ai/cordis' {
-  interface Context { multiGitRepoManager: MultiGitRepoManager }
+  interface Context { multiGitRepoManagerByWqz: MultiGitRepoManager }
 }
 
 export class MultiGitRepoManager extends TypertRemoteService {
   private readonly temporaryTargets = new Map<string, NamedManagedTarget[]>()
   constructor(ctx: Context, private readonly projectSettings?: ProjectSettingsStore) {
-    super(ctx, 'multiGitRepoManager')
+    super(ctx, MULTI_GIT_REPO_MANAGER_SERVICE_NAME)
     ctx.on('agent/disposed', ({ agent }) => { this.releaseSession(agent) })
     ctx.effect(() => () => this.temporaryTargets.clear())
   }
