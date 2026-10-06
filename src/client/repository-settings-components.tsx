@@ -1,8 +1,8 @@
 import { Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
   NamedManagedTarget,
-  ReviewRepository,
-  ReviewWorkspace,
+  ManagedRepository,
+  ManagedWorkspace,
 } from '../repository-types.ts'
 import { absoluteReviewPath, repositoryProjectPath } from './repository-paths.ts'
 import { t } from './locales.ts'
@@ -115,7 +115,7 @@ function repositorySourceLabel(source: string): string {
   }
 }
 
-function repositoryStateLabel(state: ReviewRepository['state']): string {
+function repositoryStateLabel(state: ManagedRepository['state']): string {
   switch (state) {
     case 'ready':
       return t('repoReady')
@@ -128,7 +128,7 @@ function repositoryStateLabel(state: ReviewRepository['state']): string {
   }
 }
 
-export function RepositoryPreview({ workspace }: { workspace: ReviewWorkspace }) {
+export function RepositoryPreview({ workspace }: { workspace: ManagedWorkspace }) {
   const targets = workspace.targets ?? workspace.repositories
   const gitCount = workspace.repositories.filter(repo => repo.state === 'ready').length
   const directoryCount = workspace.targets?.filter(target => target.kind === 'directory' && target.state === 'ready').length ?? 0

@@ -1,149 +1,89 @@
-/** Read repository manifests without executing project scripts or changing Git state. */
-import { readFile, realpath, stat } from 'node:fs/promises'
+/** Classify explicit targets without executing Git commands or project scripts. */
+import { realpath, stat } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
-import { basename, isAbsolute, resolve } from 'node:path'
-import type { ManagedTargetKind, ReviewProject, ReviewRepository, ReviewWorkspace } from './repository-types.ts'
+import { basename, isAbsolute } from 'node:path'
+import type { ManagedTargetKind, ManagedProject, ManagedWorkspace, ProjectIndexEntry } from './repository-types.ts'
 import { inspectTarget } from './managed-target.ts'
 import { discoveryContainers } from './target-discovery.ts'
-import { findProjectFile, PROJECT_FILE_NAME } from './repository-project-file.ts'
-import {
-  canonicalRepositoryPath,
-  inside,
-  projectRepositoryPath as projectPath,
-} from './repository-path-policy.ts'
-import { parseRepositoryManifest } from './repository-manifest.ts'
+import { managedProjectSchema } from './repository-schemas.ts'
+import { findProjectFile, readProjectFile, PROJECT_FILE_NAME } from './repository-project-file.ts'
+import { canonicalRepositoryPath, inside } from './repository-path-policy.ts'
 export { inside } from './repository-path-policy.ts'
-export { parseRepositoryManifest } from './repository-manifest.ts'
-
-const MAX_MANIFEST_BYTES = 1024 * 1024
-const MAX_MANIFEST_REPOSITORIES = 512
-
-type RepositoryCandidate = Pick<ReviewRepository, 'name' | 'path' | 'source'> & { kind?: ManagedTargetKind }
 
 export function pathKey(path: string): string {
   return process.platform === 'win32' ? path.toLowerCase() : path
 }
 
-function failure(error: unknown): string {
-  const code = (error as NodeJS.ErrnoException).code
-  return code === 'ENOENT'
-    ? 'Path does not exist'
-    : error instanceof Error
-      ? error.message
-      : String(error)
-}
-
-async function normalizeProject(project: ReviewProject): Promise<ReviewProject> {
-  if (!isAbsolute(project.root)) throw new Error('Project root must be an absolute path')
-  const root = await realpath(project.root)
+async function normalizeProject(project: ManagedProject): Promise<ManagedProject> {
+  const validated = managedProjectSchema.parse(project)
+  if (!isAbsolute(validated.root)) throw new Error('Project root must be an absolute path')
+  const root = await realpath(validated.root)
   if (!(await stat(root)).isDirectory()) throw new Error('Project root is not a directory')
+  const normalize = async (entry: { name: string; path: string }) => ({
+    ...entry, path: await canonicalRepositoryPath(root, entry.path),
+  })
   return {
-    ...project,
-    root,
-    configFiles: project.configFiles.map(file => projectPath(root, file)),
-    repositories: project.repositories.map(path => projectPath(root, path)),
-    directories: project.directories === undefined ? undefined : await Promise.all(project.directories.map(async entry => ({ ...entry, path: await canonicalRepositoryPath(root, entry.path) }))),
-    namedRepositories:
-      project.namedRepositories === undefined
-        ? undefined
-        : await Promise.all(
-            project.namedRepositories.map(async entry => ({
-              ...entry,
-              path: await canonicalRepositoryPath(root, entry.path),
-            })),
-          ),
+    ...validated, root,
+    repositories: await Promise.all(validated.repositories.map(normalize)),
+    directories: await Promise.all(validated.directories.map(normalize)),
   }
 }
 
-async function collectRepositoryCandidates(project: ReviewProject): Promise<{
-  candidates: RepositoryCandidate[]
-  warnings: string[]
-}> {
-  const root = project.root
-  const warnings: string[] = []
-  const candidates: RepositoryCandidate[] = project.repositories.map(path => ({
-    name: basename(path),
-    path,
-    source: 'manual',
-    kind: 'git',
-  }))
-  candidates.push(
-    ...(project.namedRepositories ?? []).map(entry => ({ ...entry, kind: 'git' as const, source: PROJECT_FILE_NAME })),
-    ...(project.directories ?? []).map(entry => ({ ...entry, kind: 'directory' as const, source: PROJECT_FILE_NAME })),
-  )
-  for (const file of project.configFiles) {
-    const filename = resolve(root, file)
-    try {
-      if ((await stat(filename)).size > MAX_MANIFEST_BYTES)
-        throw new Error('Configuration file exceeds 1 MiB')
-      const entries = parseRepositoryManifest(await readFile(filename, 'utf8'), filename)
-      if (entries.length > MAX_MANIFEST_REPOSITORIES)
-        throw new Error('Configuration file exceeds 512 repositories')
-      candidates.push(...entries.map(entry => ({ ...entry, kind: 'git' as const, source: projectPath(root, filename) })))
-    } catch (error) {
-      warnings.push(`${projectPath(root, filename)}: ${failure(error)}`)
-    }
-  }
-  if (project.includeProjectRoot) {
-    candidates.unshift({ name: project.name || basename(root), path: root, source: 'project' })
-  }
-  return { candidates, warnings }
-}
-
-export async function previewProject(project: ReviewProject): Promise<ReviewWorkspace> {
+export async function previewProject(project: ManagedProject): Promise<ManagedWorkspace> {
   const normalized = await normalizeProject(project)
-  const { candidates, warnings } = await collectRepositoryCandidates(normalized)
-  const result: ReviewWorkspace = {
-    project: normalized,
-    repositories: [],
-    warnings,
-    roots: [], targets: [], boundaries: await discoveryContainers(normalized),
-  }
+  const candidates = [
+    ...normalized.repositories.map(entry => ({ ...entry, kind: 'git' as const, source: PROJECT_FILE_NAME })),
+    ...normalized.directories.map(entry => ({ ...entry, kind: 'directory' as const, source: PROJECT_FILE_NAME })),
+  ]
+  const targets = []
   const seen = new Set<string>()
   const declaredKinds = new Map<string, ManagedTargetKind>()
+  // Explicit rows win over the automatic root so a type mismatch remains visible.
   for (const candidate of candidates) {
-    const repo = await inspectTarget(normalized.root, candidate)
-    const key = pathKey(repo.path)
+    const target = await inspectTarget(normalized.root, candidate)
+    const key = pathKey(target.path)
     const previousKind = declaredKinds.get(key)
-    if (previousKind && candidate.kind && previousKind !== candidate.kind) throw new Error('A target cannot be declared as both Git and directory')
-    if (candidate.kind) declaredKinds.set(key, candidate.kind)
+    if (previousKind && previousKind !== candidate.kind) throw new Error('A target cannot be declared as both Git and directory')
+    declaredKinds.set(key, candidate.kind)
     if (seen.has(key)) continue
-    if (seen.size >= 512) throw new Error('Project exceeds 512 managed targets')
     seen.add(key)
-    result.targets!.push(repo)
-    if (repo.state === 'ready') result.roots.push(repo.path)
-    if (repo.kind === 'git') result.repositories.push({ ...repo, state: repo.state === 'kindMismatch' ? 'error' : repo.state })
+    targets.push(target)
   }
-  result.roots = [...new Map(result.roots.map(path => [pathKey(path), path])).values()]
-  result.workspaceRevision = createHash('sha256').update(JSON.stringify([result.targets, result.boundaries])).digest('hex')
-  return result
+  if (normalized.includeProjectRoot && !seen.has(pathKey(normalized.root))) {
+    targets.unshift(await inspectTarget(normalized.root, { name: normalized.name || basename(normalized.root), path: normalized.root, source: 'project' }))
+  }
+  if (targets.length > 512) throw new Error('Project exceeds 512 managed targets')
+  const boundaries = await discoveryContainers(normalized)
+  return {
+    project: normalized, targets, boundaries, warnings: [],
+    repositories: targets.filter(target => target.kind === 'git').map(target => ({
+      ...target, state: target.state === 'kindMismatch' ? 'error' as const : target.state,
+    })),
+    roots: targets.filter(target => target.state === 'ready').map(target => target.path),
+    workspaceRevision: createHash('sha256').update(JSON.stringify([targets, boundaries])).digest('hex'),
+  }
 }
 
-/** Most-specific project wins; a repo-root session also belongs to its aggregate. */
-export async function resolveReviewWorkspace(
-  cwd: string,
-  projects: ReviewProject[],
-): Promise<ReviewWorkspace> {
+/** The closest local file wins, including an explicit disabled configuration. */
+export async function resolveManagedWorkspace(cwd: string, index: ProjectIndexEntry[]): Promise<ManagedWorkspace> {
   const sessionRoot = await realpath(cwd)
   const local = await findProjectFile(sessionRoot)
-  if (local !== null && local.project.enabled !== false) return previewProject(local.project)
-  const previews: ReviewWorkspace[] = []
-  for (const project of projects) {
-    if (project.enabled === false) continue
-    try {
-      const preview = await previewProject(project)
-      previews.push(preview)
-    } catch {
-      // An unavailable project must not disable unrelated sessions.
+  if (local !== null && local.project.enabled) return previewProject(local.project)
+  if (local === null) {
+    for (const entry of [...index].sort((a, b) => b.root.length - a.root.length)) {
+      // An index is a locator, never an authorization to consume its target declarations.
+      if (!inside(entry.root, sessionRoot)) continue
+      const configured = await readProjectFile(entry.root)
+      if (configured !== null) {
+        if (configured.project.enabled) return previewProject(configured.project)
+        break
+      }
     }
   }
-  const direct = [...previews]
-    .sort((a, b) => (b.project?.root.length ?? 0) - (a.project?.root.length ?? 0))
-    .find(preview => preview.project !== null && inside(preview.project.root, sessionRoot))
-  if (direct !== undefined) return direct
-  for (const preview of previews) {
-    if (preview.roots.some(root => inside(root, sessionRoot))) return preview
-  }
   const target = await inspectTarget(sessionRoot, { name: basename(sessionRoot), path: sessionRoot, source: 'project' })
-  return { project: null, repositories: [], warnings: [], roots: target.state === 'ready' ? [sessionRoot] : [], targets: [target], boundaries: [], workspaceRevision: createHash('sha256').update(JSON.stringify(target)).digest('hex') }
+  return {
+    project: null, repositories: [], warnings: [], targets: [target], boundaries: [],
+    roots: target.state === 'ready' ? [target.path] : [],
+    workspaceRevision: createHash('sha256').update(JSON.stringify([target])).digest('hex'),
+  }
 }

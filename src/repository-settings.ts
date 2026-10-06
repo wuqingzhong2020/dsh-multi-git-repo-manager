@@ -1,15 +1,14 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { SettingsForms } from '@deepseek-ai/dsh-settings'
-import { reviewProjectSchema, reviewSettingsSchema } from './repository-schemas.ts'
-import type { ReviewProject, ReviewProjectSettings, SaveReviewProjects } from './repository-types.ts'
+import { projectIndexEntrySchema, projectIndexSettingsSchema } from './repository-schemas.ts'
+import type { ProjectIndexEntry, ProjectIndexSettings, SaveProjectIndex } from './repository-types.ts'
 import { PACKAGE_NAME } from './typert-descriptors.ts'
 
-/** All writes go through the Desktop profile's native revision-fenced settings. */
+/** Native revision-fenced Profile index; target declarations live only on disk. */
 export class RepositorySettings {
   private settings: SettingsForms | undefined
-  private legacyProjects: ReviewProject[] = []
 
-  constructor(private readonly ctx: Context, private initial: ReviewProject[] = []) {
+  constructor(private readonly ctx: Context, private initial: ProjectIndexEntry[] = []) {
     ctx.inject(['settings'], (sctx) => {
       this.settings = sctx.settings
       ctx.effect(() => sctx.settings.configure({ auto: false }, ctx.fiber), 'multi-git-repo-manager: custom settings')
@@ -17,30 +16,22 @@ export class RepositorySettings {
     })
   }
 
-  adoptLegacyProjects(projects: ReviewProject[]): void {
-    this.legacyProjects = [...new Map([...projects, ...this.legacyProjects].map(project => [project.root, project])).values()]
-  }
-
-  get(): ReviewProjectSettings {
+  get(): ProjectIndexSettings {
     const entry = this.entry()
     const descriptor = this.settings?.describe({ redactSecrets: true }).find(item => item.ns === entry?.options.id)
     const value = descriptor?.value as { projects?: unknown } | undefined
     return {
-      projects: reviewProjectSchema.array().parse([
-        ...new Map([...this.legacyProjects, ...reviewProjectSchema.array().parse(value?.projects ?? this.initial)]
-          .map(project => [project.root, project])).values(),
-      ]),
+      projects: projectIndexEntrySchema.array().max(64).parse(value?.projects ?? this.initial),
       revision: descriptor?.revision ?? 0,
     }
   }
 
-  async save(request: SaveReviewProjects): Promise<ReviewProjectSettings> {
-    const validated = reviewSettingsSchema.parse(request)
+  async save(request: SaveProjectIndex): Promise<ProjectIndexSettings> {
+    const validated = projectIndexSettingsSchema.parse(request)
     const entry = this.entry()
     if (this.settings === undefined || typeof entry?.options.id !== 'string') throw new Error('Native project settings are unavailable')
     await this.settings.update(entry.options.id, { projects: validated.projects }, validated.revision)
     this.initial = validated.projects
-    this.legacyProjects = []
     return this.get()
   }
 

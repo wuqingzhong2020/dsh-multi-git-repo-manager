@@ -2,13 +2,13 @@
 
 [简体中文](README.md) | [English](README.en.md)
 
-Version: **v0.1.3**.
+Version: **v0.1.4**.
 
-The Host service and Remote namespace are `multiGitRepoManagerByWqz`; the paired review service is `multiGitFileReviewByWqz`. Consumers can import identities from `dsh-multi-git-repo-manager/service-names`. Upgrade the paired review plugin together; project files and Profile settings remain compatible.
+The Host service and Remote namespace are `multiGitRepoManagerByWqz`; the paired review service is `multiGitFileReviewByWqz`. Consumers can import identities from `dsh-multi-git-repo-manager/service-names`. Upgrade the paired review plugin together; service identities and review preferences remain stable. Project configuration is v2 only; the Profile keeps a root-only index.
 
 **Shared Git repository and ordinary directory management for DeepSeek Harness plugins.** Extracted from [dsh-file-review-tab-Multi-git-repository](https://github.com/wuqingzhong2020/dsh-file-review-tab-Multi-git-repository), it provides the native right-sidebar **Multi-repository management** tab. Other plugins can share project configuration, target discovery and file ownership through the `multiGitRepoManagerByWqz` service.
 
-The manager runs independently. File Review **v0.3.4** requires exactly **0.1.3** of this plugin; install and enable both for review. Diffs, comments, confirmation and undo/reapply belong to the consumer. The extraction has not changed `D:\projectZJGG\ref\dsh-file-review`.
+The manager runs independently. File Review **v0.3.5** requires exactly **0.1.4** of this plugin; install and enable both for review. Diffs, comments, confirmation and undo/reapply belong to the consumer. The extraction has not changed `D:\projectZJGG\ref\dsh-file-review`.
 
 ## User documentation
 
@@ -20,21 +20,20 @@ Open the right sidebar in a project conversation and choose **Multi-repository m
 
 ## Developer documentation
 
-Read [architecture and integration](docs/ARCHITECTURE.md) and the [managed-target model](docs/MANAGED_TARGETS.en.md) before extending the plugin. They describe Host/Client boundaries, v1/v2 migration, target states and authoritative file admission.
+Read [architecture and integration](docs/ARCHITECTURE.md) before extending the plugin. It describes Host/Client boundaries, v2 configuration, target states and authoritative file admission.
 
-Maintainers should also read the [release and marketplace guide](docs/RELEASING.md). See [version history](docs/releases/version.md), [ordinary-directory validation](docs/NON_GIT_VERIFICATION.md) and [earlier Desktop checks](docs/DESKTOP_VERIFICATION.md) for evidence and limits. The architecture, release and validation records are currently in Chinese.
+Maintainers should also read the [release and marketplace guide](docs/RELEASING.md). See [version history](docs/releases/version.md) for changes and [development and validation](#development-and-validation) below for validation limits. The architecture and release guides are currently in Chinese.
 
 ## Features
 
 - **Typed targets:** add, name, edit and remove Git repositories and ordinary directories, with separate Git/directory/unavailable counts. Removing an entry does not remove files.
 - **Native sidebar tab:** use the host's tab, title and body slots; switching or hiding tabs preserves the form. Container-based layout adapts to narrow panes.
 - **Project configuration:** enable/disable multi-target scope, optionally include the project root, and save internal targets in `dsh-file-review-repositories.json`. Conversations in subdirectories discover the nearest project file.
-- **v1/v2 compatibility:** existing Git-only v1 files continue to work. The first save using directories or discovery containers writes v2 and preserves the original v1 bytes in `.v1.bak`.
+- **V2-only configuration:** explicit Git and directory lists; invalid formats are rejected, with no imports or format upgrades.
 - **Direct-child discovery:** configure containers such as `project` and `project/plugins`. Discovery returns candidates; explicitly add and save them to manage them. Containers do not become targets automatically.
 - **Type and availability checks:** recognize independent Git roots and worktree `.git` files. Ordinary directories without their own Git metadata are ready; missing paths, damaged metadata and kind mismatches retain diagnostics.
 - **Session-only external targets:** external Git repositories and ordinary directories use absolute paths and stay out of project JSON. Agent disposal, plugin unloading and process restart release them.
 - **Authoritative ownership:** the deepest target wins; unavailable children, unknown nested repositories and unmanaged components block parent fallback. Real-path checks cover escaping links, Git metadata and files not yet created.
-- **Legacy import:** parse old JSON, INI and `.gitmodules` lists and match Profile indexes for explicit migration. Legacy indexes alone do not enable extra scope.
 - **Atomic save and notifications:** bind saves to the current project and file revision. Shared events connect independent browser bundles so consumers can reload their workspace.
 - **Language and directory selection:** follow the host's Chinese/English setting and preserve user text. Use the host directory picker and convert internal selections to relative paths.
 
@@ -42,20 +41,20 @@ Maintainers should also read the [release and marketplace guide](docs/RELEASING.
 
 The declared target is **DSH >=0.2.0**, with **0.2.0-rc.2** supported as a test channel. Actual validation used Windows Desktop 0.2.0-rc.2 at `D:\app\DeepSeekHarnessDesktop\DeepSeek Harness.exe`. Stable/newer hosts, the complete Web host and other platforms have not completed real-host validation.
 
-Local builds produce `dist/dsh-multi-git-repo-manager-0.1.3.tgz` and its `.sha256`. Public download URLs require the matching asset to be uploaded to [GitHub Releases](https://github.com/wuqingzhong2020/dsh-multi-git-repo-manager/releases) first. Existing validation records describe local delivery, rather than confirming a public release.
+Local builds produce `dist/dsh-multi-git-repo-manager-0.1.4.tgz` and its `.sha256`. Public download URLs require the matching asset to be uploaded to [GitHub Releases](https://github.com/wuqingzhong2020/dsh-multi-git-repo-manager/releases) first. Existing validation records describe local delivery, rather than confirming a public release.
 
 ### DeepSeek Harness Desktop
 
 Fully exit Desktop, including the tray process, then install the local package in PowerShell. Replace the example download path:
 
 ```powershell
-pnpm --dir "$env:USERPROFILE\.dsh\profiles\desktop" add "D:\Downloads\dsh-multi-git-repo-manager-0.1.3.tgz"
+pnpm --dir "$env:USERPROFILE\.dsh\profiles\desktop" add "D:\Downloads\dsh-multi-git-repo-manager-0.1.4.tgz"
 ```
 
 For the matching review consumer, install both archives together:
 
 ```powershell
-pnpm --dir "$env:USERPROFILE\.dsh\profiles\desktop" add "D:\Downloads\dsh-multi-git-repo-manager-0.1.3.tgz" "D:\Downloads\dsh-file-review-tab-multi-git-repository-0.3.4.tgz"
+pnpm --dir "$env:USERPROFILE\.dsh\profiles\desktop" add "D:\Downloads\dsh-multi-git-repo-manager-0.1.4.tgz" "D:\Downloads\dsh-file-review-tab-multi-git-repository-0.3.5.tgz"
 ```
 
 Restart, confirm the required plugins are enabled on the Plugins page, and open management from the right-sidebar Start page. **Installation and enablement are separate:** DSH 0.2 loads only selected `dsh.profile.bundles`. An npm dependency does not select its plugin. The manager may run alone; review requires both plugins.
@@ -67,13 +66,13 @@ For a new build with the same version, copy the tgz to a filename containing its
 From the manager repository, install an existing local archive:
 
 ```sh
-dsh plugin --profile web add ./dist/dsh-multi-git-repo-manager-0.1.3.tgz
+dsh plugin --profile web add ./dist/dsh-multi-git-repo-manager-0.1.4.tgz
 ```
 
 After the public release and matching asset exist:
 
 ```sh
-dsh plugin --profile web add https://github.com/wuqingzhong2020/dsh-multi-git-repo-manager/releases/download/v0.1.3/dsh-multi-git-repo-manager-0.1.3.tgz
+dsh plugin --profile web add https://github.com/wuqingzhong2020/dsh-multi-git-repo-manager/releases/download/v0.1.4/dsh-multi-git-repo-manager-0.1.4.tgz
 ```
 
 Install and enable the consumer too if needed. Restart `dsh web` when hot reload is unavailable. Prebuilt tgz is the current default; see the [release guide](docs/RELEASING.md) for source-install requirements concerning `lib/`. Full Web operation remains unverified.
@@ -97,7 +96,7 @@ The script retains source/window validation, creates an adjacent `app.asar.dsh-d
 
 An included project root is classified using its own metadata. A non-Git root becomes an ordinary directory, while independent Git children remain separate, more specific targets. Disable root inclusion when only listed targets should be managed.
 
-### Configuration example and migration
+### Configuration example
 
 Keep the existing filename **`dsh-file-review-repositories.json`**. A v2 project with directories and discovery:
 
@@ -115,7 +114,7 @@ Keep the existing filename **`dsh-file-review-repositories.json`**. A v2 project
 }
 ```
 
-Git entries use `repositories`; ordinary entries use `directories`. The file location determines the project root, which is not persisted as an absolute machine path. Git-only v1 files remain usable. First saving directories or discovery upgrades to v2 and preserves the original bytes in `.v1.bak`; an existing backup is not overwritten. Upgraded files remain v2. Unknown fields, future versions and stale file revisions prevent overwriting.
+Git entries use `repositories`, directories use `directories`, and the file location determines the root. Only v2 is supported; there are no imports or format upgrades. Unknown fields, invalid paths and stale revisions reject overwriting.
 
 ### Discovery and temporary targets
 
@@ -130,7 +129,7 @@ Limits: **1 MiB project file, 512 targets, 32 discovery containers**. See the [u
 Pin the required shared peer so the host supplies a single plugin instance:
 
 ```json
-{ "peerDependencies": { "dsh-multi-git-repo-manager": "0.1.3" } }
+{ "peerDependencies": { "dsh-multi-git-repo-manager": "0.1.4" } }
 ```
 
 Inject the Cordis service on the Host:
@@ -164,13 +163,12 @@ The browser uses `sessions.scope(sessionId)?.get('remote.multiGitRepoManagerByWq
 | `discoverTargets(project)` | Preview the current project's draft containers without enabling candidates |
 | `resolveTargetPaths(paths)` | Resolve ownership of up to 4096 concrete input paths |
 | `setTemporaryTargets(entries)` | Replace this session's external `name`/`path`/`kind` target collection |
-| `setTemporaryRepositories(entries)` | Legacy Git-only update that retains existing ordinary temporary targets |
 | `directoryStart(path)` | Resolve the picker starting directory for the current project |
 
 | Public entry | Purpose |
 | --- | --- |
 | Package root | Service, plugin exports and Host configuration/path tools |
-| `/types` | Typed targets and ownership results, with compatible `Review*` names |
+| `/types` | Neutral project/target DTOs and the required `ManagedWorkspaceReader` read contract |
 | `/workspace`, `/project-file`, `/schemas`, `/settings` | Resolution, persistence, validation and Profile settings |
 | `/paths` | Browser display paths; does not replace Host admission |
 | `/events` | Cross-bundle change notifications and subscriptions |
@@ -178,14 +176,14 @@ The browser uses `sessions.scope(sessionId)?.get('remote.multiGitRepoManagerByWq
 | `/settings-model`, `/directory-picker`, `/directory` | Draft conversion, browser picker and Host starting-path validation |
 | `/remote`, `/typert` | DSH remote declarations and protocol |
 
-Bundle pure `/paths` and `/events` tools as needed and fetch a new workspace after notifications. They do not use Node filesystems. Events connect independent bundles and are not a filesystem watcher. The manager owns the service, Remote namespace and management tab; consumers register their own business UI. See [integration rules](docs/MANAGED_TARGETS.en.md).
+Bundle pure `/paths` and `/events` tools as needed and fetch a new workspace after notifications. They do not use Node filesystems. Events connect independent bundles and are not a filesystem watcher. The manager owns the service, Remote namespace and management tab; consumers register their own business UI. See [target ownership](docs/ARCHITECTURE.md#目标与文件归属).
 
 ## Troubleshooting
 
 | Symptom | Check |
 | --- | --- |
 | Installed but no management entry | Enable the plugin in the active Profile, use a project conversation and the right Start page; restart and verify Host/Client hashes |
-| Preview exists but multi-target review is inactive | Generate and enable the project file; legacy indexes and discovery candidates are previews |
+| Preview exists but multi-target review is inactive | Generate and enable the project file; the root-only index and discovery candidates do not authorize targets |
 | A component inside a parent Git root is classified as ordinary | Classification uses its own metadata; choose ordinary directory if it has no independent repository |
 | Kind mismatch | Check for new Git metadata, explicitly change the declared kind and save |
 | Stale-save error | Preserve needed draft edits, reload, merge changes and save against the new revision |
@@ -208,15 +206,15 @@ pnpm test:pack
 
 Tests use source files and compiled `lib/`; build after functionality changes. Git integration tests need `git` on PATH, and link tests need writable temporary directories supporting directory links. Tests use temporary projects. `test:pack` checks exports, internal modules and archive contents and generates SHA256.
 
-The consumer's local pnpm override links version 0.1.3 to the adjacent manager repository. Published dependencies remain pinned. Ship the manager before the dependent package; the manager never imports a review consumer.
+The consumer's local pnpm override links version 0.1.4 to the adjacent manager repository. Published dependencies remain pinned. Ship the manager before the dependent package; the manager never imports a review consumer.
 
-Recorded validation passed **49 manager Node tests**, **172 consumer Node tests**, **8 browser tests** and isolated package installation. Actual Desktop checks covered directory discovery, v2 save/backup, review scope switching and normal exit/restart. Mixed tool turns and other listed cases are covered by automated tests, rather than a full manual real-host run. See [validation details](docs/NON_GIT_VERIFICATION.md).
+Current regression covers v2 configuration, complete contracts, session isolation, admission, paired installation and browser UI. See [version notes](docs/releases/version.md#v014) for actual Desktop results. Full Web, stable hosts and other platforms remain unverified.
 
 ## Public release and marketplace
 
 Use the GitHub source repository and prebuilt Release archives; npm publication is optional. Source pushes, Release uploads and marketplace entries are separate steps. After preparing installable artifacts, follow the community's current [contribution guide](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/blob/main/contributing.md).
 
-The repository includes a [release guide](docs/RELEASING.md), [v0.1.3 notes](docs/releases/version.md#v012) and [marketplace YAML template](docs/market/wuqingzhong2020__dsh-multi-git-repo-manager.yml). These maintenance documents do not establish that publication or listing has occurred.
+The repository includes a [release guide](docs/RELEASING.md), [v0.1.4 notes](docs/releases/version.md#v014) and [marketplace YAML template](docs/market/wuqingzhong2020__dsh-multi-git-repo-manager.yml). These maintenance documents do not establish that publication or listing has occurred.
 
 ## Credits
 

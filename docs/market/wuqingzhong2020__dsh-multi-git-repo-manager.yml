@@ -1,4 +1,4 @@
-# 发布 v0.1.3 Release 和同名安装资产后，复制到社区目录 data/plugins/ 申请收录。
+# 发布 v0.1.4 Release 和同名安装资产后，复制到社区目录 data/plugins/ 申请收录。
 # 模板存在不表示已发布、提交或收录。
 url: https://github.com/wuqingzhong2020/dsh-multi-git-repo-manager
 name: wuqingzhong2020/dsh-multi-git-repo-manager
@@ -6,4 +6,4 @@ category: git
 description:
   en: Shared Git repository and ordinary directory management with a native sidebar tab, project configuration, discovery, and file ownership for DeepSeek Harness plugins.
   zh: 为 DeepSeek Harness 插件提供公共 Git 仓库与普通目录管理、原生侧栏 Tab、工程配置、目录发现和文件归属。
-tarball: https://github.com/wuqingzhong2020/dsh-multi-git-repo-manager/releases/download/v0.1.3/dsh-multi-git-repo-manager-0.1.3.tgz
+tarball: https://github.com/wuqingzhong2020/dsh-multi-git-repo-manager/releases/download/v0.1.4/dsh-multi-git-repo-manager-0.1.4.tgz

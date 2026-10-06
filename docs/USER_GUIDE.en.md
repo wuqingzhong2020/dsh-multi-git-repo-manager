@@ -2,11 +2,11 @@
 
 [简体中文](USER_GUIDE.md) | [English](USER_GUIDE.en.md)
 
-For manager **0.1.3**, based on the current implementation and actual Windows Desktop 0.2.0-rc.2. See [installation](../README.en.md#installation); review functionality comes from a separate consumer.
+For manager **0.1.4**, based on the current implementation and actual Windows Desktop 0.2.0-rc.2. See [installation](../README.en.md#installation); review functionality comes from a separate consumer.
 
 ## 1. Enable and open
 
-Install and enable the manager on the Desktop Plugins page. For File Review, also install and enable consumer 0.3.3, which requires manager 0.1.3. The active Profile must select the required bundles.
+Install and enable the manager on the Desktop Plugins page. For File Review, also install and enable consumer 0.3.5, which requires manager 0.1.4. The active Profile must select the required bundles.
 
 Open a project conversation, show the right sidebar and select **Multi-repository management** on its Start page. The **+** new-tab button provides the same entry. Native tabs support split panes and full screen; management no longer appears in the conversation header.
 
@@ -14,7 +14,7 @@ The session supplies the read-only project directory, name and configuration fil
 
 ![Actual Desktop target editor and counts after restart](image/manager-after-restart.png)
 
-This screenshot uses a Chinese host and an isolated fixture with one Git repository and two ordinary directories after save and normal restart. See [recorded evidence](NON_GIT_VERIFICATION.md).
+This screenshot uses a Chinese host and an isolated fixture with one Git repository and two ordinary directories after save and normal restart. See [validation limits](#9-validation-limits).
 
 ## 2. Add a target
 
@@ -41,26 +41,26 @@ Choose **Preview discovery**. Only immediate children are inspected, without rea
 
 Choose **Add to list** for each desired ready candidate and save. Discovery results are not enabled targets. A container is not added automatically; add it explicitly if its loose files should be managed.
 
-## 4. Save, reload and migrate
+## 4. Save and reload
 
-The filename remains `dsh-file-review-repositories.json` for compatibility. Future consumers should share the manager service.
+The manager owns `dsh-file-review-repositories.json`; consumers read its authoritative management results.
 
 | Field | Meaning |
 | --- | --- |
-| `version` | Format 1 or 2 |
+| `version` | Format 2 only |
 | `enabled` | Enable the project's multi-target scope |
 | `includeProjectRoot` | Include the root as a target |
 | `repositories` | Named Git targets with internal relative paths |
 | `directories` | v2 named ordinary directory targets |
 | `discovery.containers` | v2 discovery paths; candidates still require explicit addition |
 
-Git-only v1 remains readable and writable. First saving directories or discovery writes v2 and preserves the original file in `.v1.bak`, without replacing an existing backup. Upgraded files remain v2. See the [JSON example](../README.en.md#configuration-example-and-migration).
+Only v2 is read and saved, with no imports or format upgrades. See the [JSON example](../README.en.md#configuration-example).
 
 The file location determines the project root. Limits are 1 MiB, 512 targets and 32 containers. Canonical duplicates are merged; the same path cannot explicitly declare both kinds.
 
 After changing JSON on disk, **Reload saved configuration** replaces the current form. A save refuses a changed file revision: preserve needed edits, reload, merge and save again. Unknown fields, future versions and invalid paths are not silently overwritten.
 
-Legacy Profile entries, INI, JSON and `.gitmodules` can provide migration previews. Generate and enable the project file before extra multi-target scope becomes active. Unconfigured or disabled projects retain the basic current-session-directory scope.
+The Profile stores project roots only. A valid, enabled project file is the authority for managed targets. Unconfigured or disabled projects use the current session's base scope.
 
 ## 5. External temporary targets
 
@@ -82,7 +82,7 @@ Temporary edits can notify consumers immediately; internal draft changes require
 
 Changing kind updates the declaration and never runs `git init` or rewrites consumers' historical references. **Delete** asks for confirmation, removes the form entry, and requires saving internal changes. Disk files remain.
 
-The deepest target wins, including unavailable targets. Unknown nested repositories, unmanaged container children, `.git` metadata and escaping links block parent fallback. Developers should use the [ownership API](MANAGED_TARGETS.en.md); users can repair the target and reload.
+The deepest target wins, including unavailable targets. Unknown nested repositories, unmanaged container children, `.git` metadata and escaping links block parent fallback. Developers should use the [target ownership contract](ARCHITECTURE.md#目标与文件归属); users can repair the target and reload.
 
 ## 7. File Review integration
 
@@ -106,4 +106,4 @@ The review consumer supports recorded Last turn, This session and Pending review
 
 ## 9. Validation limits
 
-Actual Windows Desktop checks covered discovery, v1/v2 migration, save, scope selection and exit/restart. External multi-session isolation and mixed tool-turn operations are covered by automated tests. Full Web, stable hosts and other platforms remain unverified. See the [validation record](NON_GIT_VERIFICATION.md).
+Current regression covers v2 configuration, complete contracts, session isolation, admission, paired installation and browser UI. See [version notes](releases/version.md#v014) for actual Desktop results. Full Web, stable hosts and other platforms remain unverified.

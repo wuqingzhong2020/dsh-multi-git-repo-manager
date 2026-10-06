@@ -7,10 +7,10 @@ import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type {
   NamedManagedTarget,
   TargetDiscovery,
-  ReviewProject,
-  ReviewProjectPage,
-  ReviewWorkspace,
-  SaveReviewProject,
+  ManagedProject,
+  ManagedProjectPage,
+  ManagedWorkspace,
+  SaveManagedProject,
 } from '../repository-types.ts'
 import { repositoriesChanged } from './repository-events.ts'
 import { pickRepositoryDirectory } from './directory-picker.ts'
@@ -31,10 +31,10 @@ import { t } from './locales.ts'
 
 interface ProjectRemote {
   directoryStart(path: string): Promise<RemoteResult<string>>
-  discoverTargets(project: ReviewProject): Promise<RemoteResult<TargetDiscovery>>
-  project(): Promise<RemoteResult<ReviewProjectPage>>
-  saveProject(request: SaveReviewProject): Promise<RemoteResult<ReviewProjectPage>>
-  setTemporaryTargets(entries: NamedManagedTarget[]): Promise<RemoteResult<ReviewWorkspace>>
+  discoverTargets(project: ManagedProject): Promise<RemoteResult<TargetDiscovery>>
+  project(): Promise<RemoteResult<ManagedProjectPage>>
+  saveProject(request: SaveManagedProject): Promise<RemoteResult<ManagedProjectPage>>
+  setTemporaryTargets(entries: NamedManagedTarget[]): Promise<RemoteResult<ManagedWorkspace>>
 }
 
 async function unwrapProjectResult<T>(promise: Promise<RemoteResult<T>>): Promise<T> {
@@ -53,9 +53,9 @@ export function useRepositorySettings(ctx: Context, sessionId: string) {
     if (service === undefined) throw new Error(t('remoteUnavailable'))
     return service
   }
-  const [page, setPage] = useState<ReviewProjectPage | null>(null)
-  const [draft, setDraft] = useState<ReviewProject | null>(null)
-  const [preview, setPreview] = useState<ReviewWorkspace | null>(null)
+  const [page, setPage] = useState<ManagedProjectPage | null>(null)
+  const [draft, setDraft] = useState<ManagedProject | null>(null)
+  const [preview, setPreview] = useState<ManagedWorkspace | null>(null)
   const [discovery, setDiscovery] = useState<TargetDiscovery | null>(null)
   const [busy, setBusy] = useState(false)
   const [dirty, setDirty] = useState(false)
@@ -65,10 +65,10 @@ export function useRepositorySettings(ctx: Context, sessionId: string) {
   // Reloads and session changes invalidate earlier requests before they can update the form.
   const requestVersion = useRef(0)
 
-  const acceptPage = (result: ReviewProjectPage) => {
+  const acceptPage = (result: ManagedProjectPage) => {
     setDiscovery(null)
     setPage(result)
-    setDraft(createRepositoryDraft(result.project, result.workspace, result.temporaryRepositories))
+    setDraft(createRepositoryDraft(result.project, result.temporaryTargets))
     setPreview(result.workspace)
     setDirty(false)
   }
@@ -101,7 +101,7 @@ export function useRepositorySettings(ctx: Context, sessionId: string) {
     }
   }, [sessionId])
 
-  const edit = (patch: Partial<ReviewProject>) => {
+  const edit = (patch: Partial<ManagedProject>) => {
     setDraft(current => (current === null ? null : { ...current, ...patch }))
     setPreview(null)
     setDirty(true)
@@ -111,20 +111,26 @@ export function useRepositorySettings(ctx: Context, sessionId: string) {
 
   useEffect(() => {
     if (!page?.configured || draft === null) return
+    const version = requestVersion.current
+    let remote: ProjectRemote
+    try { remote = projectService() }
+    catch (error) { setMessage(error instanceof Error ? error.message : String(error)); return }
     const entries = collectTemporaryTargets(draft)
     const timer = setTimeout(() => {
-      void unwrapProjectResult(projectService().setTemporaryTargets(entries))
+      void unwrapProjectResult(remote.setTemporaryTargets(entries))
         .then(() => {
+          if (requestVersion.current !== version) return
           repositoriesChanged()
         })
         .catch(error => {
+          if (requestVersion.current !== version) return
           setMessage(error instanceof Error ? error.message : String(error))
         })
     }, 300)
     return () => {
       clearTimeout(timer)
     }
-  }, [draft?.namedRepositories, draft?.directories, page?.configured, sessionId])
+  }, [draft?.repositories, draft?.directories, page?.configured, sessionId])
 
   const chooseDirectory = async (index: number) => {
     if (draft === null) return
@@ -169,17 +175,20 @@ export function useRepositorySettings(ctx: Context, sessionId: string) {
     setBusy(true)
     setMessage('')
     try {
+      const remote = projectService()
       await unwrapProjectResult(
-        projectService().saveProject({
+        remote.saveProject({
           project: prepareProjectForSave(draft),
           revision: page.revision,
           fileRevision: page.fileRevision,
         }),
       )
+      if (requestVersion.current !== version) return
       await unwrapProjectResult(
-        projectService().setTemporaryTargets(collectTemporaryTargets(draft)),
+        remote.setTemporaryTargets(collectTemporaryTargets(draft)),
       )
-      const result = await unwrapProjectResult(projectService().project())
+      if (requestVersion.current !== version) return
+      const result = await unwrapProjectResult(remote.project())
       if (requestVersion.current !== version) return
       acceptPage(result)
       repositoriesChanged()

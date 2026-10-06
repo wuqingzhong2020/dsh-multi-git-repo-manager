@@ -1,127 +1,58 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import {
-  collectTemporaryRepositories,
-  createRepositoryDraft,
-  prepareProjectForSave,
-} from '../src/client/repository-settings-model.ts'
+import { collectTemporaryTargets, createRepositoryDraft, draftTargets, prepareProjectForSave } from '../src/client/repository-settings-model.ts'
 import { relativeProjectDirectory } from '../src/client/repository-paths.ts'
+const project = extra => ({ name: 'App', root: 'D:/Projects/App', enabled: true, includeProjectRoot: true,
+  repositories: [], directories: [], discovery: { containers: [] }, ...extra })
 
-const project = extra => ({
-  name: 'App', root: 'D:/Projects/App', includeProjectRoot: true,
-  configFiles: ['legacy.ini'], repositories: ['legacy'], ...extra,
-})
-const workspace = repositories => ({ project: null, repositories, roots: [], warnings: [] })
-const repository = extra => ({
-  name: 'Core', path: 'D:/Projects/App/libs/core', relativePath: 'libs/core',
-  source: 'manual', state: 'ready', ...extra,
-})
-
-function freeze(value) {
-  if (value === null || typeof value !== 'object') return value
-  Object.values(value).forEach(freeze)
-  return Object.freeze(value)
-}
-
-test('saving drops incomplete rows, normalizes paths, and leaves the editable draft intact', () => {
-  const draft = freeze(project({ name: ' App ', namedRepositories: [
-    { name: ' Core ', path: ' d:\\projects\\app\\libs\\core ' },
-    { name: ' Outside ', path: '../Shared' },
-    { name: '', path: 'libs/unnamed' },
-    { name: 'Missing path', path: '  ' },
-  ] }))
+test('saving normalizes complete Git and directory rows without changing the draft', () => {
+  const draft = project({ name: ' App ', repositories: [
+    { name: ' Core ', path: ' d:/projects/app/libs/core ' }, { name: ' Outside ', path: '../Shared' },
+    { name: '', path: 'unnamed' }, { name: 'Missing', path: ' ' },
+  ], directories: [{ name: ' Local ', path: ' ./local ' }] })
+  const original = structuredClone(draft)
   const saved = prepareProjectForSave(draft)
-  assert.deepEqual(saved, {
-    ...project({ name: 'App', enabled: true, configFiles: [], repositories: [] }),
-    namedRepositories: [
-      { name: 'Core', path: 'libs/core' },
-      { name: 'Outside', path: 'D:/Projects/Shared' },
-    ],
-  })
-  assert.equal(draft.name, ' App ')
-  assert.equal(draft.namedRepositories.length, 4)
+  assert.deepEqual(saved.repositories, [{ name: 'Core', path: 'libs/core' }, { name: 'Outside', path: 'D:/Projects/Shared' }])
+  assert.deepEqual(saved.directories, [{ name: 'Local', path: 'local' }])
+  assert.equal(saved.name, 'App')
+  assert.deepEqual(draft, original)
 })
 
-test('saving preserves explicit project toggles and supports an empty repository list', () => {
-  const draft = project({ enabled: false, includeProjectRoot: false })
-  const saved = prepareProjectForSave(draft)
-  assert.equal(saved.enabled, false)
-  assert.equal(saved.includeProjectRoot, false)
-  assert.deepEqual(saved.namedRepositories, [])
-  assert.deepEqual(collectTemporaryRepositories(draft), [])
+test('empty lists preserve explicit disabled and root toggles', () => {
+  const saved = prepareProjectForSave(project({ enabled: false, includeProjectRoot: false }))
+  assert.equal(saved.enabled, false); assert.equal(saved.includeProjectRoot, false)
+  assert.deepEqual(collectTemporaryTargets(saved), [])
 })
 
-test('drafts keep unavailable repositories and source order while excluding the project root', () => {
-  const resolved = freeze(workspace([
-    repository({ name: 'App', source: 'project', relativePath: '.' }),
-    repository({ name: 'Missing', relativePath: 'missing', state: 'missing' }),
-    repository({ name: 'Plain directory', relativePath: 'plain', state: 'notGit' }),
-    repository({ name: 'Imported', relativePath: 'imported', source: 'legacy.ini' }),
-  ]))
-  const draft = createRepositoryDraft(freeze(project()), resolved, [])
-  assert.deepEqual(draft.namedRepositories, [
-    { name: 'Missing', path: 'missing' },
-    { name: 'Plain directory', path: 'plain' },
-    { name: 'Imported', path: 'imported' },
+test('the editor retains unavailable declarations and merges both temporary kinds', () => {
+  const original = project({ repositories: [{ name: 'Missing', path: 'missing' }], directories: [{ name: 'Local', path: 'local' }] })
+  const temporary = [{ name: 'Git', path: 'E:/Git', kind: 'git' }, { name: 'Directory', path: 'F:/Local', kind: 'directory' }]
+  const draft = createRepositoryDraft(original, temporary)
+  assert.deepEqual(draftTargets(draft), [
+    { name: 'Missing', path: 'missing', kind: 'git' }, temporary[0],
+    { name: 'Local', path: 'local', kind: 'directory' }, temporary[1],
   ])
-  assert.deepEqual(draft.configFiles, [])
-  assert.deepEqual(draft.repositories, [])
-  assert.equal(draft.enabled, true)
+  assert.deepEqual(original.repositories, [{ name: 'Missing', path: 'missing' }])
 })
 
-test('temporary rows merge by normalized path, retaining the existing displayed name', () => {
-  const resolved = freeze(workspace([repository({ name: 'First name', relativePath: 'E:/Shared' })]))
-  const temporary = freeze([
-    { name: 'Duplicate', path: 'e:\\shared\\.\\' },
-    { name: 'New row', path: 'F:/Tools' },
-    { name: 'Another duplicate', path: 'f:/tools' },
-  ])
-  const draft = createRepositoryDraft(project({ enabled: false }), resolved, temporary)
-  assert.equal(draft.enabled, false)
-  assert.deepEqual(draft.namedRepositories, [
-    { name: 'First name', path: 'E:/Shared' },
-    { name: 'New row', path: 'F:/Tools' },
-  ])
-  assert.equal(temporary.length, 3)
-  assert.equal(resolved.repositories.length, 1)
-})
-
-test('only named external repositories are sent to the session, including parent and other-drive paths', () => {
-  const draft = freeze(project({ namedRepositories: [
-    { name: 'Root', path: '.' },
-    { name: 'Relative child', path: 'libs/core' },
-    { name: 'Absolute child', path: 'd:/projects/APP/libs/core' },
-    { name: ' Parent ', path: '../Shared' },
-    { name: 'Other drive', path: 'E:\\Tools\\.\\' },
-    { name: 'Network', path: '\\\\server\\share\\repo' },
-    { name: ' ', path: 'E:/Unnamed' },
-    { name: 'Empty', path: '' },
-  ] }))
-  assert.deepEqual(collectTemporaryRepositories(draft), [
-    { name: 'Parent', path: 'D:/Projects/Shared' },
-    { name: 'Other drive', path: 'E:/Tools' },
-    { name: 'Network', path: '//server/share/repo' },
+test('external rows use absolute session paths while interior rows stay relative', () => {
+  const draft = project({ repositories: [
+    { name: 'Root', path: '.' }, { name: 'Inside', path: 'd:/projects/APP/lib' },
+    { name: ' Parent ', path: '../Shared' }, { name: 'Other drive', path: 'E:/Tools/./' },
+  ], directories: [{ name: 'Directory', path: 'F:/Local' }] })
+  assert.deepEqual(collectTemporaryTargets(draft), [
+    { name: 'Parent', path: 'D:/Projects/Shared', kind: 'git' },
+    { name: 'Other drive', path: 'E:/Tools', kind: 'git' },
+    { name: 'Directory', path: 'F:/Local', kind: 'directory' },
   ])
 })
 
-test('POSIX case and sibling prefixes remain outside the project', () => {
-  const draft = project({ root: '/work/App', namedRepositories: [
-    { name: 'Inside', path: '/work/App/lib' },
-    { name: 'Case differs', path: '/work/app/lib' },
+test('POSIX spelling and sibling prefixes do not change containment', () => {
+  const draft = project({ root: '/work/App', directories: [
+    { name: 'Inside', path: '/work/App/lib' }, { name: 'Case', path: '/work/app/lib' },
     { name: 'Sibling', path: '/work/App-other/lib' },
   ] })
-  assert.deepEqual(collectTemporaryRepositories(draft), [
-    { name: 'Case differs', path: '/work/app/lib' },
-    { name: 'Sibling', path: '/work/App-other/lib' },
-  ])
+  assert.deepEqual(collectTemporaryTargets(draft).map(row => row.path), ['/work/app/lib', '/work/App-other/lib'])
   assert.equal(relativeProjectDirectory('/work/App', '/work/App'), '.')
   assert.equal(relativeProjectDirectory('/work/App', '/work'), null)
-})
-
-test('UNC containment respects share boundaries and preserves child spelling', () => {
-  assert.equal(relativeProjectDirectory('\\\\server\\share\\App', '//SERVER/SHARE/app/Lib'), 'Lib')
-  assert.equal(relativeProjectDirectory('//server/share/App', '//server/other/App/Lib'), null)
-  assert.equal(relativeProjectDirectory('//server/share/App', '//other/share/App/Lib'), null)
-  assert.equal(relativeProjectDirectory('//server/share/App', '//server/share/App-other/Lib'), null)
-  assert.equal(relativeProjectDirectory('App', 'App/Lib'), null)
 })

@@ -1,24 +1,23 @@
 import { MULTI_GIT_REPO_MANAGER_SERVICE_NAME } from './service-names.ts'
-/** Shared session-scoped repository management; never executes Git mutations. */
+/** Session-scoped management; configuration and admission have one authority. */
+import { createHash } from 'node:crypto'
 import { realpath } from 'node:fs/promises'
 import { basename, isAbsolute } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
-import type { NamedManagedTarget, TargetDiscovery, TargetPathResolution, ReviewProjectSettings, SaveReviewProjects, NamedReviewRepository, ReviewProject, ReviewProjectPage, ReviewWorkspace, SaveReviewProject } from './repository-types.ts'
+import type { NamedManagedTarget, TargetDiscovery, TargetPathResolution, ProjectIndexSettings, SaveProjectIndex, ManagedProject, ManagedProjectPage, ManagedWorkspace, ManagedWorkspaceReader, SaveManagedProject } from './repository-types.ts'
 import { discoverTargets } from './target-discovery.ts'
 import { resolveTargetPaths } from './target-ownership.ts'
-import { createHash } from 'node:crypto'
-import { pathKey, previewProject, resolveReviewWorkspace } from './repository-workspace.ts'
-import { findProjectFile, PROJECT_FILE_NAME, readProjectFile, writeProjectFile } from './repository-project-file.ts'
+import { pathKey, previewProject, resolveManagedWorkspace } from './repository-workspace.ts'
+import { findProjectFile, writeProjectFile } from './repository-project-file.ts'
 import { canonicalRepositoryPath } from './repository-path-policy.ts'
 import { resolveDirectoryStart } from './repository-directory.ts'
-import { reviewProjectSchema } from './repository-schemas.ts'
+import { namedManagedTargetSchema } from './repository-schemas.ts'
 
 export interface ProjectSettingsStore {
-  get(): ReviewProjectSettings
-  save(request: SaveReviewProjects): Promise<ReviewProjectSettings>
-  adoptLegacyProjects?(projects: ReviewProject[]): void
+  get(): ProjectIndexSettings
+  save(request: SaveProjectIndex): Promise<ProjectIndexSettings>
 }
 
 export function sessionCwd(agent: Agent): string {
@@ -32,191 +31,125 @@ declare module '@deepseek-ai/cordis' {
   interface Context { multiGitRepoManagerByWqz: MultiGitRepoManager }
 }
 
-export class MultiGitRepoManager extends TypertRemoteService {
-  private readonly temporaryTargets = new Map<string, NamedManagedTarget[]>()
+export class MultiGitRepoManager extends TypertRemoteService implements ManagedWorkspaceReader {
+  private readonly temporaryTargets = new Map<string, { root: string; entries: NamedManagedTarget[] }>()
+  private readonly temporaryVersions = new Map<string, { id: number; cwd: string }>()
+  private temporaryRequestSequence = 0
   constructor(ctx: Context, private readonly projectSettings?: ProjectSettingsStore) {
     super(ctx, MULTI_GIT_REPO_MANAGER_SERVICE_NAME)
     ctx.on('agent/disposed', ({ agent }) => { this.releaseSession(agent) })
-    ctx.effect(() => () => this.temporaryTargets.clear())
+    ctx.effect(() => () => { this.temporaryTargets.clear(); this.temporaryVersions.clear() })
   }
 
-  /** Import the previous consumer's Profile index without overwriting manager settings. */
-  adoptLegacyProjects(projects: unknown): void {
-    this.projectSettings?.adoptLegacyProjects?.(reviewProjectSchema.array().parse(projects))
-  }
-
-  /** Read only the project selected by this Agent's authoritative directory. */
-  async project(agent: Agent): Promise<ReviewProjectPage> {
-    const settings = this.projectSettings?.get() ?? { projects: [], revision: 0 }
-    const cwd = sessionCwd(agent)
-    const root = await realpath(cwd)
-    const localFile = await findProjectFile(root)
-    const matched = await resolveReviewWorkspace(cwd, settings.projects)
-    let project: ReviewProject
-    if (localFile !== null) {
-      project = localFile.project
-    } else if (matched.project !== null) {
-      project = { ...matched.project, name: basename(matched.project.root) }
-    } else {
-      project = {
-        name: basename(root),
-        root,
-        includeProjectRoot: true,
-        configFiles: [],
-        repositories: [],
-        enabled: true,
-      }
+  private temporary(agent: Agent, root: string): NamedManagedTarget[] {
+    const stored = this.temporaryTargets.get(agentKey(agent))
+    if (stored && pathKey(stored.root) !== pathKey(root)) {
+      const key = agentKey(agent)
+      this.temporaryTargets.delete(key)
+      // Preserve a new request already issued for this cwd, while invalidating old work.
+      if (this.temporaryVersions.get(key)?.cwd !== sessionCwd(agent)) this.temporaryVersions.delete(key)
+      return []
     }
-    const workspace =
-      localFile !== null && project.enabled !== false
-        ? await this.workspace(agent)
-        : await previewProject(project)
+    return stored?.entries ?? []
+  }
+
+  async project(agent: Agent): Promise<ManagedProjectPage> {
+    const settings = this.projectSettings?.get() ?? { projects: [], revision: 0 }
+    const root = await realpath(sessionCwd(agent))
+    const localFile = await findProjectFile(root)
+    const matched = await resolveManagedWorkspace(root, settings.projects)
+    const project: ManagedProject = localFile?.project ?? matched.project ?? {
+      name: basename(root), root, enabled: true, includeProjectRoot: true,
+      repositories: [], directories: [], discovery: { containers: [] },
+    }
     return {
-      project,
-      revision: settings.revision,
-      configured: localFile !== null,
-      workspace,
+      project, revision: settings.revision, configured: localFile !== null,
+      workspace: localFile !== null && project.enabled ? await this.workspace(agent) : await previewProject(project),
       fileRevision: localFile?.revision ?? '',
-      temporaryRepositories:
-        localFile !== null
-          ? (this.temporaryTargets.get(agentKey(agent))?.filter(entry => entry.kind === 'git').map(({ name, path }) => ({ name, path })) ?? localFile.temporaryRepositories)
-          : [],
-      temporaryTargets: this.temporaryTargets.get(agentKey(agent)) ?? localFile?.temporaryRepositories.map(entry => ({ ...entry, kind: 'git' as const })) ?? [],
+      temporaryTargets: this.temporary(agent, project.root),
     }
   }
 
   async directoryStart(agent: Agent, path: string): Promise<string> {
-    const current = await this.project(agent)
-    return resolveDirectoryStart(current.project.root, path)
+    return resolveDirectoryStart((await this.project(agent)).project.root, path)
   }
 
-  /** Preview and save cannot choose another project's root through the wire. */
-  async preview(agent: Agent, project: ReviewProject): Promise<ReviewWorkspace> {
+  /** Wire callers cannot select a different project's configuration. */
+  async preview(agent: Agent, project: ManagedProject): Promise<ManagedWorkspace> {
     const current = await this.project(agent)
-    if (pathKey(await realpath(project.root)) !== pathKey(current.project.root)) {
+    if (pathKey(await realpath(project.root)) !== pathKey(current.project.root))
       throw new Error('Project root does not belong to this session')
-    }
     return previewProject({ ...project, name: current.project.name, root: current.project.root })
   }
 
-  async saveProject(agent: Agent, request: SaveReviewProject): Promise<ReviewProjectPage> {
-    const preview = await this.preview(agent, {
-      ...request.project,
-      configFiles: [],
-      repositories: [],
-    })
+  async saveProject(agent: Agent, request: SaveManagedProject): Promise<ManagedProjectPage> {
+    const preview = await this.preview(agent, request.project)
     const project = preview.project!
-    await writeProjectFile(
-      {
-        ...project,
-        enabled: request.project.enabled ?? project.enabled ?? true,
-        namedRepositories: project.namedRepositories?.filter(entry => !isAbsolute(entry.path)),
-      },
-      request.fileRevision,
-    )
+    await writeProjectFile(project, request.fileRevision)
     if (this.projectSettings !== undefined) {
       const settings = this.projectSettings.get()
-      const index = settings.projects.findIndex(
-        item => pathKey(item.root) === pathKey(project.root),
-      )
-      const projects = [...settings.projects]
-      const indexEntry = {
-        name: project.name,
-        root: project.root,
-        includeProjectRoot: project.includeProjectRoot,
-        configFiles: [PROJECT_FILE_NAME],
-        repositories: [],
-        enabled: request.project.enabled ?? project.enabled ?? true,
-      }
-      if (index === -1) {
-        projects.push(indexEntry)
-      } else {
-        projects[index] = indexEntry
-      }
-      // The project-local file is authoritative; the profile keeps its index.
-      try {
-        await this.projectSettings.save({ projects, revision: settings.revision })
-      } catch {
-        // The local file remains usable if updating the profile index fails.
-      }
+      const projects = settings.projects.filter(item => pathKey(item.root) !== pathKey(project.root))
+      projects.push({ root: project.root })
+      // The project file remains authoritative when the optional index update fails.
+      try { await this.projectSettings.save({ projects, revision: settings.revision }) }
+      catch { /* Reading the nearest project file still works. */ }
     }
     return this.project(agent)
   }
 
-  async workspace(agent: Agent): Promise<ReviewWorkspace> {
-    const indexed = this.projectSettings?.get().projects ?? []
-    const active: ReviewProject[] = []
-    for (const project of indexed) {
-      if (!project.configFiles.includes(PROJECT_FILE_NAME) || project.enabled === false) continue
-      try {
-        const local = await readProjectFile(project.root)
-        if (local !== null && local.project.enabled !== false) active.push(local.project)
-      } catch {
-        // Invalid or unavailable project files never expand another session's scope.
-      }
-    }
-    const base = await resolveReviewWorkspace(sessionCwd(agent), active)
-    const temporary = this.temporaryTargets.get(agentKey(agent)) ?? []
-    if (base.project === null || temporary.length === 0) return base
+  async workspace(agent: Agent): Promise<ManagedWorkspace> {
+    const base = await resolveManagedWorkspace(sessionCwd(agent), this.projectSettings?.get().projects ?? [])
+    // Visiting an unconfigured workspace also releases the previous project's scope.
+    const temporary = this.temporary(agent, base.project?.root ?? await realpath(sessionCwd(agent)))
+    if (base.project === null) return base
+    if (temporary.length === 0) return base
     const extra = await previewProject({
-      name: base.project.name,
-      root: base.project.root,
-      includeProjectRoot: false,
-      configFiles: [],
-      repositories: [],
-      namedRepositories: temporary.filter(entry => entry.kind === 'git'),
-      directories: temporary.filter(entry => entry.kind === 'directory'),
+      ...base.project, includeProjectRoot: false,
+      repositories: temporary.filter(entry => entry.kind === 'git').map(({ name, path }) => ({ name, path })),
+      directories: temporary.filter(entry => entry.kind === 'directory').map(({ name, path }) => ({ name, path })),
+      discovery: { containers: [] },
     })
-    const repositories = [...base.repositories]
-    const targets = [...(base.targets ?? [])]
-    for (const target of extra.targets ?? []) {
-      if (!targets.some(current => pathKey(current.path) === pathKey(target.path))) targets.push({ ...target, source: 'temporary' })
+    const targets = [...base.targets]
+    for (const target of extra.targets) {
+      if (!targets.some(current => pathKey(current.path) === pathKey(target.path)))
+        targets.push({ ...target, source: 'temporary' })
     }
     if (targets.length > 512) throw new Error('Project exceeds 512 managed targets')
-    const seen = new Set(repositories.map(repo => pathKey(repo.path)))
-    for (const repo of extra.repositories) {
-      if (seen.has(pathKey(repo.path))) continue
-      seen.add(pathKey(repo.path))
-      repositories.push({ ...repo, source: 'temporary' })
-    }
     return {
-      ...base,
-      repositories,
-      targets,
+      ...base, targets,
+      repositories: targets.filter(target => target.kind === 'git').map(target => ({
+        ...target, state: target.state === 'kindMismatch' ? 'error' as const : target.state,
+      })),
+      roots: targets.filter(target => target.state === 'ready').map(target => target.path),
       workspaceRevision: createHash('sha256').update(JSON.stringify([targets, base.boundaries])).digest('hex'),
-      warnings: [...base.warnings, ...extra.warnings],
-      roots: [
-        ...new Map([...base.roots, ...extra.roots].map(root => [pathKey(root), root])).values(),
-      ],
     }
   }
 
-  /** All repositories outside the project live only in this agent's session. */
-  async setTemporaryRepositories(
-    agent: Agent,
-    entries: NamedReviewRepository[],
-  ): Promise<ReviewWorkspace> {
-    const directories = (this.temporaryTargets.get(agentKey(agent)) ?? []).filter(entry => entry.kind === 'directory')
-    return this.setTemporaryTargets(agent, [...directories, ...entries.map(entry => ({ ...entry, kind: 'git' as const }))])
-  }
-
-  async setTemporaryTargets(agent: Agent, entries: NamedManagedTarget[]): Promise<ReviewWorkspace> {
+  async setTemporaryTargets(agent: Agent, entries: NamedManagedTarget[]): Promise<ManagedWorkspace> {
+    const key = agentKey(agent)
+    const version = ++this.temporaryRequestSequence
+    this.temporaryVersions.set(key, { id: version, cwd: sessionCwd(agent) })
     const current = await this.project(agent)
-    if (!current.configured) {
-      throw new Error('Enable this project before adding temporary repositories')
-    }
-    const root = current.project.root
-    if (entries.length > 512) throw new Error('Project exceeds 512 managed targets')
+    if (!current.configured) throw new Error('Enable this project before adding temporary targets')
     const normalized: NamedManagedTarget[] = []
-    for (const entry of entries) {
-      const path = await canonicalRepositoryPath(root, entry.path)
-      if (!isAbsolute(entry.path) || !isAbsolute(path)) {
-        throw new Error('Temporary repositories must use absolute paths outside the project')
-      }
+    for (const entry of namedManagedTargetSchema.array().max(512).parse(entries)) {
+      const path = await canonicalRepositoryPath(current.project.root, entry.path)
+      if (!isAbsolute(entry.path) || !isAbsolute(path))
+        throw new Error('Temporary targets must use absolute paths outside the project')
       normalized.push({ ...entry, path })
     }
-    this.temporaryTargets.set(agentKey(agent), normalized)
-    return this.workspace(agent)
+    // Normalization can finish out of order. A released or superseded request cannot publish.
+    if (this.temporaryVersions.get(key)?.id !== version) return this.workspace(agent)
+    const previous = this.temporaryTargets.get(key)
+    this.temporaryTargets.set(key, { root: current.project.root, entries: normalized })
+    try { return await this.workspace(agent) }
+    catch (error) {
+      if (this.temporaryVersions.get(key)?.id === version) {
+        if (previous) this.temporaryTargets.set(key, previous)
+        else this.temporaryTargets.delete(key)
+      }
+      throw error
+    }
   }
 
   async resolveTargetPaths(agent: Agent, paths: string[]): Promise<TargetPathResolution[]> {
@@ -224,12 +157,12 @@ export class MultiGitRepoManager extends TypertRemoteService {
     return resolveTargetPaths(await this.workspace(agent), sessionCwd(agent), paths)
   }
 
-  async discoverTargets(agent: Agent, project: ReviewProject): Promise<TargetDiscovery> {
-    const preview = await this.preview(agent, project)
-    return discoverTargets(preview.project!)
+  async discoverTargets(agent: Agent, project: ManagedProject): Promise<TargetDiscovery> {
+    return discoverTargets((await this.preview(agent, project)).project!)
   }
 
-  /** Called by session owners on disposal; process restart also releases all entries. */
-  releaseSession(agent: Agent): void { this.temporaryTargets.delete(agentKey(agent)) }
-
+  releaseSession(agent: Agent): void {
+    this.temporaryTargets.delete(agentKey(agent))
+    this.temporaryVersions.delete(agentKey(agent))
+  }
 }

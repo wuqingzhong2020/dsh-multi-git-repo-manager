@@ -1,13 +1,13 @@
 /** Inspect only configured containers' immediate children, never source contents. */
 import { readdir, realpath } from 'node:fs/promises'
 import { basename, isAbsolute, resolve } from 'node:path'
-import type { ReviewProject, TargetDiscovery } from './repository-types.ts'
+import type { ManagedProject, TargetDiscovery } from './repository-types.ts'
 import { canonicalPathKey, inspectTarget } from './managed-target.ts'
 import { canonicalRepositoryPath } from './repository-path-policy.ts'
 
-export async function discoveryContainers(project: ReviewProject): Promise<string[]> {
+export async function discoveryContainers(project: ManagedProject): Promise<string[]> {
   const result: string[] = []
-  for (const input of project.discovery?.containers ?? []) {
+  for (const input of project.discovery.containers) {
     const path = await canonicalRepositoryPath(project.root, input)
     if (isAbsolute(path)) throw new Error('Discovery containers must be inside the project')
     result.push(resolve(project.root, path))
@@ -15,11 +15,11 @@ export async function discoveryContainers(project: ReviewProject): Promise<strin
   return [...new Map(result.map(path => [canonicalPathKey(path), path])).values()]
 }
 
-export async function discoverTargets(project: ReviewProject): Promise<TargetDiscovery> {
+export async function discoverTargets(project: ManagedProject): Promise<TargetDiscovery> {
   const containers = await discoveryContainers(project)
   const containerKeys = new Set(containers.map(canonicalPathKey))
   const known = new Set((await Promise.all([
-    ...(project.namedRepositories ?? []), ...(project.directories ?? []),
+    ...project.repositories, ...project.directories,
   ].map(entry => realpath(resolve(project.root, entry.path)).catch(() => resolve(project.root, entry.path))))).map(canonicalPathKey))
   const result: TargetDiscovery = { candidates: [], warnings: [] }
   for (const container of containers) {

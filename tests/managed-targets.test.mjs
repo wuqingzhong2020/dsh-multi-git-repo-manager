@@ -6,11 +6,12 @@ import { join, relative } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { previewProject, resolveTargetPaths, discoverTargets, MultiGitRepoManager } from '../lib/index.js'
 import { readProjectFile, writeProjectFile, PROJECT_FILE_NAME } from '../src/repository-project-file.ts'
-import { reviewProjectPageSchema } from '../src/repository-schemas.ts'
+import { managedProjectPageSchema } from '../src/repository-schemas.ts'
+import { Context } from '@deepseek-ai/cordis'
 
 const sandbox = await mkdtemp(join(tmpdir(), 'dsh-managed-targets-'))
 after(async () => { assert.ok(relative(tmpdir(), sandbox).startsWith('dsh-managed-targets-')); await rm(sandbox, { recursive: true, force: true }) })
-const project = (root, patch = {}) => ({ name: 'Targets', root, enabled: true, includeProjectRoot: true, configFiles: [], repositories: [], ...patch })
+const project = (root, patch = {}) => ({ name: 'Targets', root, enabled: true, includeProjectRoot: true, repositories: [], directories: [], discovery: { containers: [] }, ...patch })
 async function directory(name) { const path = join(sandbox, name); await mkdir(path, { recursive: true }); return path }
 function git(path) { execFileSync('git', ['init', '-q', path]) }
 
@@ -27,7 +28,7 @@ test('type declarations do not silently change when Git metadata appears or disa
   const root = await directory('types'); const plain = await directory('types/plain'); const broken = await directory('types/broken')
   git(plain); await mkdir(join(broken, '.git'))
   const workspace = await previewProject(project(root, { includeProjectRoot: false,
-    namedRepositories: [{ name: 'Lost Git', path: 'lost' }, { name: 'Broken', path: 'broken' }],
+    repositories: [{ name: 'Lost Git', path: 'lost' }, { name: 'Broken', path: 'broken' }],
     directories: [{ name: 'Now Git', path: 'plain' }] }))
   assert.deepEqual(workspace.targets.map(target => target.state), ['missing', 'error', 'kindMismatch'])
   assert.deepEqual(workspace.roots, [])
@@ -37,7 +38,7 @@ test('type declarations do not silently change when Git metadata appears or disa
 
 test('a missing or mismatched child target blocks its ready parent, including nonexistent files', async () => {
   const root = await directory('blocked'); await directory('blocked/lost')
-  const workspace = await previewProject(project(root, { namedRepositories: [{ name: 'Lost', path: 'lost' }] }))
+  const workspace = await previewProject(project(root, { repositories: [{ name: 'Lost', path: 'lost' }] }))
   const owners = await resolveTargetPaths(workspace, root, ['lost/new.txt', 'root.txt', '.git/config'])
   assert.deepEqual(owners.map(owner => owner.state), ['unavailable', 'managed', 'metadata'])
 })
@@ -66,18 +67,17 @@ test('nested undisclosed Git roots and external junctions never inherit a parent
   await assert.rejects(discoverTargets(project(root, { discovery: { containers: ['linked'] } })), /inside/)
 })
 
-test('v1 upgrades atomically to v2 with an exact backup, a conflict fence and portable directory paths', async () => {
+test('v2 saves fence revisions and normalize portable directory paths', async () => {
   const root = await directory('migration'); await directory('migration/local')
-  const v1 = await writeProjectFile(project(root), '')
+  const initial = await writeProjectFile(project(root), '')
   const original = await readFile(join(root, PROJECT_FILE_NAME))
-  assert.equal(JSON.parse(original).version, 1)
-  const v2 = await writeProjectFile(project(root, { directories: [{ name: 'Local', path: join(root, 'local') }], discovery: { containers: ['local'] } }), v1)
-  assert.deepEqual(await readFile(join(root, `${PROJECT_FILE_NAME}.v1.bak`)), original)
+  assert.equal(JSON.parse(original).version, 2)
+  const updated = await writeProjectFile(project(root, { directories: [{ name: 'Local', path: join(root, 'local') }], discovery: { containers: ['local'] } }), initial)
   const loaded = await readProjectFile(root)
   assert.deepEqual(loaded.project.directories, [{ name: 'Local', path: 'local' }])
   assert.deepEqual(loaded.project.discovery, { containers: ['local'] })
-  await assert.rejects(writeProjectFile(project(root), v1), /changed/)
-  await writeProjectFile({ ...loaded.project, directories: [] }, v2)
+  await assert.rejects(writeProjectFile(project(root), initial), /changed/)
+  await writeProjectFile({ ...loaded.project, directories: [] }, updated)
   assert.equal(JSON.parse(await readFile(join(root, PROJECT_FILE_NAME), 'utf8')).version, 2)
 })
 
@@ -92,13 +92,14 @@ test('future versions and unknown fields fail before overwriting configuration',
 test('ordinary external targets are isolated by session and absent from portable JSON', async () => {
   const root = await directory('temporary'); const external = await directory('external-directory')
   await writeProjectFile(project(root), '')
-  const manager = Object.assign(Object.create(MultiGitRepoManager.prototype), { temporaryTargets: new Map() })
+  const ctx = new Context(); after(() => ctx.fiber.dispose())
+  const manager = new MultiGitRepoManager(ctx)
   const agent = { id: 'a', session: { header: { cwd: root } } }; const other = { ...agent, id: 'b' }
   await manager.setTemporaryTargets(agent, [{ name: 'External', path: external, kind: 'directory' }])
   assert.equal((await manager.resolveTargetPaths(agent, [join(external, 'new.txt')]))[0].state, 'managed')
   assert.equal((await manager.resolveTargetPaths(other, [join(external, 'new.txt')]))[0].state, 'outside')
-  const page = reviewProjectPageSchema.parse(await manager.project(agent))
-  assert.equal(page.temporaryTargets[0].kind, 'directory'); assert.deepEqual(page.temporaryRepositories, [])
+  const page = managedProjectPageSchema.parse(await manager.project(agent))
+  assert.equal(page.temporaryTargets[0].kind, 'directory')
   assert.deepEqual(JSON.parse(await readFile(join(root, PROJECT_FILE_NAME), 'utf8')).repositories, [])
   manager.releaseSession(agent)
   assert.equal((await manager.resolveTargetPaths(agent, [join(external, 'new.txt')]))[0].state, 'outside')

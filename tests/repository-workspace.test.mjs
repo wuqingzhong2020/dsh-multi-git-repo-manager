@@ -1,142 +1,237 @@
 import { after, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdir as fsMkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, relative, sep } from 'node:path'
-import { inside, parseRepositoryManifest, previewProject, resolveReviewWorkspace } from '../src/repository-workspace.ts'
+import { inside, previewProject, resolveManagedWorkspace } from '../src/repository-workspace.ts'
 import { absoluteReviewPath, fileRepository, normalizeReviewPath, relativeProjectDirectory, repositoryProjectPath, repositoryRelativePath } from '../src/client/repository-paths.ts'
 import { readProjectFile, writeProjectFile, PROJECT_FILE_NAME } from '../src/repository-project-file.ts'
-import { MultiGitRepoManager } from '../lib/index.js'
+import { managedWorkspaceSchema } from '../src/repository-schemas.ts'
+import { MultiGitRepoManager, resolveTargetPaths } from '../lib/index.js'
+import { Context } from '@deepseek-ai/cordis'
 
-// Fixtures contain valid minimal Git metadata; broken markers are covered separately.
-async function mkdir(path, options) {
-  const result = await fsMkdir(path, options)
-  if (path.endsWith('.git')) await writeFile(join(path, 'HEAD'), 'ref: refs/heads/main\n')
-  return result
-}
-const directory = await mkdtemp(join(tmpdir(), 'dsh-review-repositories-'))
+const sandbox = await mkdtemp(join(tmpdir(), 'dsh-managed-workspace-'))
+const contexts = []
 after(async () => {
-  const child = relative(tmpdir(), directory)
-  assert.ok(child.startsWith('dsh-review-repositories-') && !child.includes(sep))
-  await rm(directory, { recursive: true, force: true })
+  for (const ctx of contexts) await ctx.fiber.dispose()
+  assert.ok(relative(tmpdir(), sandbox).startsWith('dsh-managed-workspace-'))
+  await rm(sandbox, { recursive: true, force: true })
 })
-const rootA = join(directory, 'project-a')
-const rootB = join(directory, 'project-b')
-const external = join(directory, 'external')
-const unrelated = join(directory, 'unrelated')
-for (const repo of [rootA, rootB, external, unrelated, join(rootA, 'libs', 'core'), join(rootB, 'libs', 'core')]) {
-  await mkdir(join(repo, '.git'), { recursive: true })
+const project = (root, extra = {}) => ({
+  name: '', root, enabled: true, includeProjectRoot: true,
+  repositories: [], directories: [], discovery: { containers: [] }, ...extra,
+})
+async function directory(name, git = false) {
+  const root = join(sandbox, name)
+  await mkdir(root, { recursive: true })
+  if (git) { await mkdir(join(root, '.git')); await writeFile(join(root, '.git', 'HEAD'), 'ref: refs/heads/main\n') }
+  return root
 }
-const project = (root, extra = {}) => ({ name: '', root, includeProjectRoot: true, configFiles: [], repositories: [], ...extra })
+const manager = store => {
+  const ctx = new Context(); contexts.push(ctx)
+  return new MultiGitRepoManager(ctx, store)
+}
+const agent = (cwd, id = cwd) => ({ id, session: { header: { cwd } } })
 
-test('INI and .gitmodules import only repository names and paths', () => {
-  assert.deepEqual(parseRepositoryManifest('\uFEFF[Core]\r\nurl=private\r\nbranch=main\r\nPATH = libs/core\r\n[submodule "Editor"]\npath="plugins/editor"', 'repos.ini'), [
-    { name: 'Core', path: 'libs/core' }, { name: 'Editor', path: 'plugins/editor' },
-  ])
-  assert.deepEqual(parseRepositoryManifest('[submodule "Tools"]\npath = tools', '.gitmodules'), [{ name: 'Tools', path: 'tools' }])
-  assert.throws(() => parseRepositoryManifest('[Core]\nurl=private', 'repos.ini'), /path/)
+test('plain aggregate and file-style Git marker have distinct ownership', async () => {
+  const root = await directory('worktree'); const worktree = await directory('worktree/child')
+  const metadata = await directory('worktree/metadata')
+  await writeFile(join(metadata, 'HEAD'), 'ref: refs/heads/main\n')
+  await writeFile(join(worktree, '.git'), 'gitdir: ../metadata')
+  const workspace = await previewProject(project(root, { repositories: [{ name: 'Child', path: 'child' }, { name: 'Duplicate', path: './child' }] }))
+  assert.deepEqual(workspace.targets.map(target => [target.kind, target.state]), [['directory', 'ready'], ['git', 'ready']])
+  assert.deepEqual(workspace.roots, [await realpath(root), await realpath(worktree)])
 })
 
-test('JSON repository arrays validate each path and preserve optional names', () => {
-  assert.deepEqual(parseRepositoryManifest('{"repositories":[{"name":"Core","path":"libs/core"},"plugins/editor"]}', 'repos.json'), [
-    { name: 'Core', path: 'libs/core' }, { name: 'editor', path: 'plugins/editor' },
-  ])
-  assert.throws(() => parseRepositoryManifest('{"repositories":[{"url":"private"}]}', 'repos.json'), /no path/)
-  assert.throws(() => parseRepositoryManifest('arbitrary', 'repos.yaml'), /Supported formats/)
+test('relative paths resolve independently in separate project files', async () => {
+  const a = await directory('same-a'); const b = await directory('same-b')
+  await directory('same-a/libs/core', true); await directory('same-b/libs/core', true)
+  await writeProjectFile(project(a, { repositories: [{ name: 'A', path: 'libs/core' }] }), '')
+  await writeProjectFile(project(b, { repositories: [{ name: 'B', path: 'libs/core' }] }), '')
+  const index = [{ root: a }, { root: b }]
+  const first = await resolveManagedWorkspace(join(a, 'libs/core'), index)
+  const second = await resolveManagedWorkspace(b, index)
+  assert.equal(first.repositories[0].name, 'A')
+  assert.equal(second.repositories[0].name, 'B')
+  assert.ok(!second.roots.includes(await realpath(join(a, 'libs/core'))))
 })
 
-test('manifest limits produce warnings without suppressing later valid manifests', async () => {
-  const root = join(directory, 'manifest-limits')
-  await mkdir(join(root, 'core', '.git'), { recursive: true })
-  await writeFile(join(root, 'oversized.ini'), ' '.repeat(1024 * 1024 + 1))
-  await writeFile(join(root, 'too-many.json'), JSON.stringify(Array(513).fill('core')))
-  await writeFile(join(root, 'invalid.json'), '{"repositories":false}')
-  await writeFile(join(root, 'valid.ini'), '[Core]\npath=core')
-  const preview = await previewProject(project(root, {
-    includeProjectRoot: false,
-    configFiles: ['oversized.ini', 'too-many.json', 'invalid.json', 'valid.ini'],
-  }))
-  assert.deepEqual(preview.warnings, [
-    'oversized.ini: Configuration file exceeds 1 MiB',
-    'too-many.json: Configuration file exceeds 512 repositories',
-    'invalid.json: JSON must contain an array or a repositories array',
-  ])
-  assert.equal(preview.repositories.length, 1)
-  assert.equal(preview.repositories[0].source, 'valid.ini')
-  assert.deepEqual(preview.roots, [await realpath(join(root, 'core'))])
+test('preview canonicalizes interior paths and keeps exterior rows absolute', async () => {
+  const root = await directory('preview', true); const outside = await directory('preview-outside', true)
+  await directory('preview/core', true)
+  const workspace = await previewProject(project(root, { repositories: [{ name: 'Core', path: join(root, 'core') }, { name: 'Outside', path: outside }] }))
+  assert.deepEqual(workspace.project.repositories.map(entry => entry.path), ['core', normalizeReviewPath(outside)])
+  assert.equal(workspace.repositories[2].path, await realpath(outside))
 })
 
-test('a plain aggregate root and a file-style Git marker retain their distinct ownership rules', async () => {
-  const root = join(directory, 'plain-aggregate')
-  const worktree = join(root, 'worktree')
-  await mkdir(worktree, { recursive: true })
-  const gitDir = join(root, 'git-metadata')
-  await mkdir(gitDir, { recursive: true })
-  await writeFile(join(gitDir, 'HEAD'), 'ref: refs/heads/main\n')
-  await writeFile(join(worktree, '.git'), 'gitdir: ../git-metadata')
-  const preview = await previewProject(project(root, { repositories: ['worktree', './worktree'] }))
-  assert.deepEqual(preview.targets.map(target => [target.kind, target.state]), [['directory', 'ready'], ['git', 'ready']])
-  assert.deepEqual(preview.roots, [await realpath(root), await realpath(worktree)])
-  const withoutRoot = await previewProject(project(root, {
-    includeProjectRoot: false, repositories: ['worktree'],
-  }))
-  assert.deepEqual(withoutRoot.roots, [await realpath(worktree)])
+test('nearest configuration wins and an unrelated indexed project grants no scope', async () => {
+  const root = await directory('nearest'); const nested = await directory('nearest/nested', true); const outside = await directory('nearest-outside', true)
+  await writeProjectFile(project(root, { repositories: [{ name: 'Nested', path: 'nested' }] }), '')
+  await writeProjectFile(project(nested), '')
+  assert.equal((await resolveManagedWorkspace(nested, [{ root }])).project.root, await realpath(nested))
+  assert.equal((await resolveManagedWorkspace(outside, [{ root }])).project, null)
 })
 
-test('different projects resolve identical relative repo paths independently', async () => {
-  await writeFile(join(rootA, 'repos.ini'), '[A-Core]\npath=libs/core\n')
-  await writeFile(join(rootB, 'repos.json'), '[{"name":"B-Core","path":"libs/core"}]')
-  const projects = [project(rootA, { configFiles: ['repos.ini'] }), project(rootB, { configFiles: ['repos.json'] })]
-  const a = await resolveReviewWorkspace(join(rootA, 'libs', 'core'), projects)
-  const b = await resolveReviewWorkspace(rootB, projects)
-  assert.equal(a.repositories[1].name, 'A-Core')
-  assert.equal(a.repositories[1].relativePath, 'libs/core')
-  assert.equal(a.repositories[1].source, 'repos.ini')
-  assert.equal(b.repositories[1].name, 'B-Core')
-  assert.equal(b.repositories[1].path, await realpath(join(rootB, 'libs', 'core')))
-  assert.ok(!b.roots.includes(await realpath(join(rootA, 'libs', 'core'))))
+test('disabled nearest file does not fall back to an enabled ancestor index', async () => {
+  const root = await directory('disabled'); const child = await directory('disabled/child')
+  await writeProjectFile(project(root, { directories: [{ name: 'Child', path: 'child' }] }), '')
+  await writeProjectFile(project(child, { enabled: false }), '')
+  const workspace = await resolveManagedWorkspace(child, [{ root }])
+  assert.equal(workspace.project, null)
+  assert.deepEqual(workspace.roots, [await realpath(child)])
 })
 
-test('preview uses relative paths only inside the project and absolute paths outside', async () => {
-  const preview = await previewProject(project(rootA, {
-    configFiles: [join(rootA, 'repos.ini')],
-    repositories: [join(rootA, 'libs', 'core'), external],
-  }))
-  assert.deepEqual(preview.project.configFiles, ['repos.ini'])
-  assert.deepEqual(preview.project.repositories, ['libs/core', normalizeReviewPath(external)])
-  assert.equal(preview.repositories[0].relativePath, '.')
-  assert.equal(preview.repositories[1].relativePath, 'libs/core')
-  assert.equal(preview.repositories[2].relativePath, normalizeReviewPath(await realpath(external)))
-  assert.equal(preview.repositories[2].path, await realpath(external))
-  assert.equal(preview.repositories[2].source, 'manual')
+test('unavailable declarations keep boundaries but never become trusted roots', async () => {
+  const root = await directory('unavailable'); await directory('unavailable/core', true); await directory('unavailable/plain')
+  const workspace = await previewProject(project(root, { includeProjectRoot: false,
+    repositories: ['core', './core', 'missing', 'plain'].map(path => ({ name: path, path })) }))
+  assert.deepEqual(workspace.repositories.map(repo => repo.state), ['ready', 'missing', 'notGit'])
+  assert.deepEqual(workspace.roots, [await realpath(join(root, 'core'))])
 })
 
-test('most specific project wins, and configured external-repo sessions find their project', async () => {
-  const nested = project(join(rootA, 'libs', 'core'), { name: 'Nested' })
-  const aggregate = project(rootA, { repositories: [external] })
-  assert.equal((await resolveReviewWorkspace(nested.root, [aggregate, nested])).project.name, 'Nested')
-  assert.equal((await resolveReviewWorkspace(external, [aggregate])).project.root, await realpath(rootA))
-  assert.equal((await resolveReviewWorkspace(unrelated, [aggregate])).project, null)
+test('an index alone cannot enable a missing project file', async () => {
+  const root = await directory('index-only', true); const outside = await directory('index-external', true)
+  const service = manager({ get: () => ({ projects: [{ root }], revision: 0 }) })
+  const page = await service.project(agent(root))
+  assert.equal(page.configured, false)
+  assert.deepEqual(page.project.repositories, [])
+  assert.equal((await service.workspace(agent(root))).project, null)
+  await assert.rejects(service.setTemporaryTargets(agent(root), [{ name: 'Outside', path: outside, kind: 'git' }]), /Enable this project/)
 })
 
-test('preview deduplicates manifests/manual paths and reports unavailable entries without adding roots', async () => {
-  const preview = await previewProject(project(rootA, {
-    includeProjectRoot: false, configFiles: ['repos.ini', 'missing.ini'],
-    repositories: ['libs/core', 'libs/../libs/core', 'missing', 'libs'],
-  }))
-  assert.equal(preview.repositories.length, 3)
-  assert.equal(preview.repositories.filter(repo => repo.state === 'ready').length, 1)
-  assert.equal(preview.repositories.filter(repo => repo.state === 'missing').length, 1)
-  assert.equal(preview.repositories.filter(repo => repo.state === 'notGit').length, 1)
-  assert.deepEqual(preview.roots, [await realpath(join(rootA, 'libs', 'core'))])
-  assert.equal(preview.warnings.length, 1)
+test('saving fences file revisions, fixes project identity and writes an index of roots only', async () => {
+  const a = await directory('save-a', true); const b = await directory('save-b', true)
+  await directory('save-a/core', true)
+  let settings = { projects: [], revision: 0 }
+  const service = manager({ get: () => structuredClone(settings), save: async request => {
+    assert.equal(request.revision, settings.revision)
+    settings = { projects: request.projects, revision: settings.revision + 1 }; return settings
+  } })
+  const receiving = agent(a); const page = await service.project(receiving)
+  const saved = await service.saveProject(receiving, { project: { ...page.project, name: 'Wire name', repositories: [{ name: 'Core', path: join(a, 'core') }] }, fileRevision: page.fileRevision, revision: page.revision })
+  assert.equal(saved.project.name, 'save-a')
+  assert.deepEqual(settings.projects, [{ root: await realpath(a) }])
+  assert.equal(saved.project.repositories[0].path, 'core')
+  assert.equal(JSON.parse(await readFile(join(a, PROJECT_FILE_NAME), 'utf8')).version, 2)
+  await assert.rejects(service.saveProject(receiving, { project: saved.project, fileRevision: page.fileRevision, revision: page.revision }), /changed/)
+  await assert.rejects(service.saveProject(agent(b), { project: saved.project, fileRevision: '', revision: 0 }), /does not belong/)
+})
+
+test('temporary Git targets remain session scoped across saves and explicit release', async () => {
+  const root = await directory('temporary', true); const outside = await directory('temporary-external', true)
+  await writeProjectFile(project(root), '')
+  const service = manager(); const receiving = agent(root, 'A'); const other = agent(root, 'B')
+  const entry = { name: 'External', path: outside, kind: 'git' }
+  assert.equal((await service.setTemporaryTargets(receiving, [entry])).repositories.at(-1).source, 'temporary')
+  assert.ok(!(await service.workspace(other)).roots.includes(await realpath(outside)))
+  const page = await service.project(receiving)
+  await service.saveProject(receiving, { project: { ...page.project, repositories: [{ name: entry.name, path: entry.path }] }, fileRevision: page.fileRevision, revision: page.revision })
+  assert.deepEqual(JSON.parse(await readFile(join(root, PROJECT_FILE_NAME), 'utf8')).repositories, [])
+  assert.equal((await service.project(receiving)).temporaryTargets[0].kind, 'git')
+  await assert.rejects(service.setTemporaryTargets(receiving, [{ ...entry, path: root }]), /outside the project/)
+  await assert.rejects(service.setTemporaryTargets(receiving, [{ ...entry, path: '../temporary-external' }]), /absolute paths/)
+  service.releaseSession(receiving)
+  assert.deepEqual((await service.project(receiving)).temporaryTargets, [])
+  assert.equal(await realpath(outside), outside)
+})
+
+test('switching project identity for the same Agent releases its old temporary targets', async () => {
+  const a = await directory('switch-a'); const b = await directory('switch-b'); const outside = await directory('switch-external')
+  await writeProjectFile(project(a), ''); await writeProjectFile(project(b), '')
+  const service = manager(); const receiving = agent(a, 'same-agent')
+  await service.setTemporaryTargets(receiving, [{ name: 'External', path: outside, kind: 'directory' }])
+  receiving.session.header.cwd = b
+  assert.ok(!(await service.workspace(receiving)).roots.includes(await realpath(outside)))
+  receiving.session.header.cwd = a
+  assert.deepEqual((await service.project(receiving)).temporaryTargets, [])
+  const unconfigured = await directory('switch-unconfigured')
+  await service.setTemporaryTargets(receiving, [{ name: 'External', path: outside, kind: 'directory' }])
+  receiving.session.header.cwd = unconfigured
+  assert.equal((await service.workspace(receiving)).project, null)
+  receiving.session.header.cwd = a
+  assert.deepEqual((await service.project(receiving)).temporaryTargets, [])
+})
+
+test('late temporary updates cannot replace the latest set or resurrect released scope', async () => {
+  const root = await directory('late-update'); const outside = await directory('late-external')
+  await writeProjectFile(project(root), '')
+  const service = manager(); const receiving = agent(root, 'late')
+  const readProject = service.project.bind(service)
+  let resume
+  service.project = async current => {
+    const page = await readProject(current)
+    if (resume === undefined) await new Promise(resolve => { resume = resolve })
+    return page
+  }
+  const old = service.setTemporaryTargets(receiving, [{ name: 'Old', path: outside, kind: 'directory' }])
+  // Wait until the old request has read its scope, without changing the manager algorithm.
+  while (resume === undefined) await new Promise(resolve => setTimeout(resolve, 1))
+  await service.setTemporaryTargets(receiving, [])
+  resume(); await old
+  assert.deepEqual((await readProject(receiving)).temporaryTargets, [])
+  resume = undefined
+  const released = service.setTemporaryTargets(receiving, [{ name: 'Released', path: outside, kind: 'directory' }])
+  while (resume === undefined) await new Promise(resolve => setTimeout(resolve, 1))
+  service.releaseSession(receiving)
+  resume(); await released
+  assert.deepEqual((await readProject(receiving)).temporaryTargets, [])
+})
+
+test('writer omits external absolute, parent and escaping junction declarations', async () => {
+  const root = await directory('portable'); const outside = await directory('portable-outside')
+  await directory('portable/child', true)
+  await symlink(outside, join(root, 'linked'), process.platform === 'win32' ? 'junction' : 'dir')
+  await writeProjectFile(project(root, { repositories: [
+    { name: 'Inside', path: join(root, 'child') }, { name: 'External', path: outside },
+    { name: 'Parent', path: '..' }, { name: 'Junction', path: 'linked' },
+  ] }), '')
+  const loaded = await readProjectFile(root)
+  assert.deepEqual(loaded.project.repositories, [{ name: 'Inside', path: 'child' }])
+  assert.ok(!('temporaryRepositories' in loaded))
+})
+
+test('persisted external targets and invalid configuration fail closed without overwriting', async () => {
+  const root = await directory('invalid-file'); const outside = await directory('invalid-external')
+  for (const data of [
+    { version: 2, includeProjectRoot: true, repositories: [{ name: 'External', path: outside }], directories: [] },
+    { version: 2, includeProjectRoot: true, repositories: [], directories: [], discovery: { containers: [outside] } },
+    { version: 1, includeProjectRoot: true, repositories: [] },
+    { version: 3, includeProjectRoot: true, repositories: [], directories: [] },
+    { version: 2, includeProjectRoot: true, repositories: [], directories: [], unknown: true },
+  ]) {
+    const bytes = JSON.stringify(data)
+    await writeFile(join(root, PROJECT_FILE_NAME), bytes)
+    await assert.rejects(resolveManagedWorkspace(root, [{ root }]))
+    await assert.rejects(writeProjectFile(project(root), ''))
+    assert.equal(await readFile(join(root, PROJECT_FILE_NAME), 'utf8'), bytes)
+  }
+})
+
+test('incomplete snapshots never grant ownership through roots', async () => {
+  const root = await directory('incomplete')
+  const incomplete = { project: null, repositories: [], roots: [root], warnings: [] }
+  assert.equal(managedWorkspaceSchema.safeParse(incomplete).success, false)
+  await assert.rejects(resolveTargetPaths(incomplete, root, ['file.txt']))
+  const complete = await resolveManagedWorkspace(root, [])
+  assert.equal(managedWorkspaceSchema.safeParse(complete).success, true)
+  assert.equal((await resolveTargetPaths(complete, root, ['file.txt']))[0].state, 'managed')
+})
+
+test('configuration size and aggregate target limits are enforced', async () => {
+  const root = await directory('limits')
+  await writeFile(join(root, PROJECT_FILE_NAME), ' '.repeat(1024 * 1024 + 1))
+  await assert.rejects(readProjectFile(root), /1 MiB/)
+  await rm(join(root, PROJECT_FILE_NAME))
+  const repositories = Array.from({ length: 512 }, (_, index) => ({ name: String(index), path: String(index) }))
+  await assert.rejects(previewProject(project(root, { repositories })), /512/)
+  await assert.rejects(writeProjectFile(project(root, { repositories, directories: [{ name: 'Extra', path: 'extra' }] }), ''), /512/)
 })
 
 test('containment accepts dot-prefixed names but rejects parent traversal and sibling prefixes', () => {
-  assert.equal(inside(rootA, join(rootA, '..notes', 'file')), true)
-  assert.equal(inside(rootA, rootB), false)
-  assert.equal(inside(rootA, `${rootA}-other`), false)
-  assert.equal(inside(rootA, join(rootA, '..', 'file')), false)
+  assert.equal(inside(join(sandbox, 'a'), join(join(sandbox, 'a'), '..notes', 'file')), true)
+  assert.equal(inside(join(sandbox, 'a'), join(sandbox, 'b')), false)
+  assert.equal(inside(join(sandbox, 'a'), `${join(sandbox, 'a')}-other`), false)
+  assert.equal(inside(join(sandbox, 'a'), join(join(sandbox, 'a'), '..', 'file')), false)
 })
 
 test('Windows paths choose the closest repository and disambiguate matching basenames', () => {
@@ -164,238 +259,4 @@ test('Windows paths choose the closest repository and disambiguate matching base
   assert.equal(absoluteReviewPath('E:\\Repos\\Core'), true)
   assert.equal(absoluteReviewPath('E:\\'), true)
   assert.equal(absoluteReviewPath('project/PluginManager'), false)
-})
-
-test('a legacy profile entry does not enable multi-repository scope without the project file', async () => {
-  const agent = { session: { header: { cwd: rootB } } }
-  const receiver = Object.create(MultiGitRepoManager.prototype)
-  receiver.temporaryTargets = new Map()
-  receiver.projectSettings = { get: () => ({ projects: [project(rootB, { repositories: ['libs/core'] })], revision: 0 }) }
-  const page = await receiver.project(agent)
-  assert.equal(page.configured, false)
-  assert.equal(page.workspace.repositories.length, 2) // available for explicit migration
-  const active = await receiver.workspace(agent)
-  assert.equal(active.project, null)
-  assert.equal(active.repositories.length, 0)
-  assert.deepEqual(active.roots, [await realpath(rootB)])
-  await assert.rejects(receiver.setTemporaryRepositories(agent, [{ name: 'Outside', path: external }]), /Enable this project/)
-})
-
-test('the page saves only the receiving session project and cannot change its identity', async () => {
-  let settings = { projects: [], revision: 0 }
-  const receiver = Object.create(MultiGitRepoManager.prototype)
-  receiver.temporaryTargets = new Map()
-  receiver.projectSettings = {
-    get: () => structuredClone(settings),
-    save: async request => {
-      assert.equal(request.revision, settings.revision)
-      settings = { projects: structuredClone(request.projects), revision: settings.revision + 1 }
-      return settings
-    },
-  }
-  const agentA = { id: 'a', session: { header: { cwd: rootA } } }
-  const agentB = { id: 'b', session: { header: { cwd: rootB } } }
-  const initial = await receiver.project(agentA)
-  assert.equal(initial.configured, false)
-  assert.equal(initial.workspace.repositories[0].state, 'ready')
-  const configuredA = await receiver.saveProject(agentA, {
-    revision: initial.revision, fileRevision: initial.fileRevision,
-    project: { ...initial.project, name: 'Project A', namedRepositories: [
-      { name: 'A-Core', path: join(rootA, 'libs', 'core') }, { name: 'External', path: external },
-    ] },
-  })
-  assert.equal(configuredA.configured, true)
-  assert.equal(configuredA.workspace.repositories[1].name, 'A-Core')
-  assert.deepEqual(settings.projects[0].configFiles, ['dsh-file-review-repositories.json'])
-  assert.equal(configuredA.project.namedRepositories[0].path, 'libs/core')
-  assert.deepEqual(JSON.parse(await readFile(join(rootA, 'dsh-file-review-repositories.json'), 'utf8')), {
-    version: 1, enabled: true, includeProjectRoot: true, repositories: [
-      { name: 'A-Core', path: 'libs/core' },
-    ],
-  })
-  assert.equal((await resolveReviewWorkspace(rootA, [])).repositories[1].name, 'A-Core')
-  assert.equal((await receiver.workspace({ id: 'external-session', session: { header: { cwd: external } } })).project, null)
-  const beforeB = await receiver.project(agentB)
-  assert.equal(beforeB.configured, false)
-  await assert.rejects(receiver.saveProject(agentB, {
-    revision: beforeB.revision, fileRevision: beforeB.fileRevision, project: configuredA.project,
-  }), /does not belong/)
-  await receiver.saveProject(agentB, {
-    revision: beforeB.revision, fileRevision: beforeB.fileRevision,
-    project: { ...beforeB.project, name: 'Project B', namedRepositories: [{ name: 'B-Core', path: 'libs/core' }] },
-  })
-  assert.equal(settings.projects.length, 2)
-  assert.equal((await receiver.project(agentA)).project.name, 'project-a')
-  assert.equal((await receiver.project(agentB)).project.name, 'project-b')
-  const beforeEdit = await receiver.project(agentA)
-  const edited = await receiver.saveProject(agentA, {
-    revision: beforeEdit.revision, fileRevision: beforeEdit.fileRevision,
-    project: { ...beforeEdit.project, namedRepositories: [{ name: 'Renamed Core', path: 'libs/core' }] },
-  })
-  assert.equal(edited.workspace.repositories.length, 2)
-  assert.equal(edited.workspace.repositories[1].name, 'Renamed Core')
-  assert.deepEqual(JSON.parse(await readFile(join(rootA, 'dsh-file-review-repositories.json'), 'utf8')).repositories, [
-    { name: 'Renamed Core', path: 'libs/core' },
-  ])
-  await assert.rejects(receiver.saveProject(agentA, {
-    revision: beforeEdit.revision, fileRevision: beforeEdit.fileRevision,
-    project: beforeEdit.project,
-  }), /changed/)
-  const siblingTemporary = { name: 'Temporary sibling', path: external }
-  const added = await receiver.setTemporaryRepositories(agentA, [siblingTemporary])
-  assert.equal(added.repositories.at(-1).source, 'temporary')
-  assert.equal(added.repositories.at(-1).relativePath, normalizeReviewPath(await realpath(external)))
-  assert.deepEqual((await receiver.project(agentA)).temporaryRepositories, [{
-    name: siblingTemporary.name, path: normalizeReviewPath(await realpath(external)),
-  }])
-  assert.ok(!(await receiver.workspace(agentB)).roots.includes(await realpath(external)))
-  assert.deepEqual((await receiver.project({ ...agentA, id: 'other-a' })).temporaryRepositories, [])
-  const currentA = await receiver.project(agentA)
-  const savedTemporary = await receiver.saveProject(agentA, {
-    revision: currentA.revision, fileRevision: currentA.fileRevision,
-    project: { ...currentA.project, namedRepositories: [...currentA.project.namedRepositories, siblingTemporary] },
-  })
-  assert.equal(savedTemporary.workspace.repositories.at(-1).source, 'temporary')
-  assert.deepEqual(JSON.parse(await readFile(join(rootA, PROJECT_FILE_NAME), 'utf8')).repositories, [
-    { name: 'Renamed Core', path: 'libs/core' },
-  ])
-  await assert.rejects(receiver.setTemporaryRepositories(agentA, [{ name: 'Interior', path: join(rootA, 'libs/core') }]), /outside the project/)
-  await assert.rejects(receiver.setTemporaryRepositories(agentA, [{ name: 'Relative exterior', path: '../external' }]), /absolute paths/)
-  if (process.platform === 'win32') {
-    const temporary = { name: 'Temporary', path: 'Z:/repositories/temporary' }
-    const withTemporary = await receiver.setTemporaryRepositories(agentA, [temporary])
-    assert.equal(withTemporary.repositories.at(-1).source, 'temporary')
-    const current = await receiver.project(agentA)
-    await receiver.saveProject(agentA, {
-      revision: current.revision, fileRevision: current.fileRevision,
-      project: { ...current.project, namedRepositories: [...current.project.namedRepositories, temporary] },
-    })
-    assert.deepEqual(JSON.parse(await readFile(join(rootA, 'dsh-file-review-repositories.json'), 'utf8')).repositories, [
-      { name: 'Renamed Core', path: 'libs/core' },
-    ])
-  }
-})
-
-test('directory picker keeps parent, sibling, and other-volume directories absolute', async () => {
-  const projectRoot = rootA
-  const subRepo = join(rootA, 'libs', 'core')
-  const crossVolumeRepo = process.platform === 'win32'
-    ? (rootA.toUpperCase().startsWith('Z:') ? 'Y:' : 'Z:') + '\\external\\repo'
-    : '/other-volume/external/repo'
-
-  // Relative conversion
-  const relSub = relativeProjectDirectory(projectRoot, subRepo)
-  assert.equal(relSub, 'libs/core')
-  assert.equal(relativeProjectDirectory(projectRoot, external), null)
-  assert.equal(relativeProjectDirectory(projectRoot, directory), null)
-  assert.equal(repositoryProjectPath(projectRoot, '../external'), normalizeReviewPath(external))
-
-  // Cannot convert to relative cross-drive / cross-volume
-  if (process.platform === 'win32') {
-    const relCross = relativeProjectDirectory(projectRoot, crossVolumeRepo)
-    assert.equal(relCross, null)
-
-    const finalCrossPath = relCross ?? normalizeReviewPath(crossVolumeRepo)
-    assert.equal(absoluteReviewPath(finalCrossPath), true)
-  }
-})
-
-test('configuration writer omits external absolute, parent traversal, and junction paths', async () => {
-  const root = join(directory, 'portable-project')
-  await mkdir(join(root, 'child', '.git'), { recursive: true })
-  await symlink(external, join(root, 'linked-external'), process.platform === 'win32' ? 'junction' : 'dir')
-  const repositories = [
-    { name: 'Inside absolute', path: join(root, 'child') },
-    { name: 'Outside absolute', path: external },
-    { name: 'Outside relative', path: '../external' },
-    { name: 'Parent', path: '..' },
-    { name: 'External junction', path: 'linked-external' },
-  ]
-  await writeProjectFile(project(root, { namedRepositories: repositories }), '')
-  const data = JSON.parse(await readFile(join(root, PROJECT_FILE_NAME), 'utf8'))
-  assert.deepEqual(data.repositories, [{ name: 'Inside absolute', path: 'child' }])
-  const read = await readProjectFile(root)
-  assert.deepEqual(read.temporaryRepositories, [])
-  assert.deepEqual(read.project.namedRepositories, data.repositories)
-})
-
-test('legacy external entries migrate as temporary rows without enabling external scope', async () => {
-  const root = join(directory, 'legacy-file')
-  await mkdir(join(root, '.git'), { recursive: true })
-  await writeFile(join(root, PROJECT_FILE_NAME), JSON.stringify({
-    version: 1, includeProjectRoot: true,
-    repositories: [{ name: 'Old external', path: '../external' }],
-  }))
-  const receiver = Object.create(MultiGitRepoManager.prototype)
-  receiver.temporaryTargets = new Map()
-  receiver.projectSettings = { get: () => ({
-    revision: 0, projects: [project(root, { configFiles: [PROJECT_FILE_NAME] })],
-  }) }
-  const agent = { id: 'legacy', session: { header: { cwd: root } } }
-  const page = await receiver.project(agent)
-  assert.equal(page.configured, true)
-  assert.deepEqual(page.project.namedRepositories, [])
-  assert.deepEqual(page.temporaryRepositories, [{ name: 'Old external', path: normalizeReviewPath(await realpath(external)) }])
-  assert.ok(!page.workspace.roots.includes(await realpath(external)))
-  const separate = { id: 'separate', session: { header: { cwd: external } } }
-  assert.equal((await receiver.workspace(separate)).project, null)
-  const saved = await receiver.saveProject(agent, { project: page.project, revision: page.revision, fileRevision: page.fileRevision })
-  assert.deepEqual(JSON.parse(await readFile(join(root, PROJECT_FILE_NAME), 'utf8')).repositories, [])
-  assert.deepEqual(saved.temporaryRepositories, [])
-})
-
-test('nested conversations load and update the nearest project configuration', async () => {
-  const root = join(directory, 'nested-project')
-  const child = join(root, 'nested', 'repo')
-  await mkdir(join(child, '.git'), { recursive: true })
-  await writeProjectFile(project(root, { namedRepositories: [{ name: 'Child', path: 'nested/repo' }] }), '')
-  const receiver = Object.create(MultiGitRepoManager.prototype)
-  receiver.temporaryTargets = new Map()
-  const agent = { id: 'nested', session: { header: { cwd: child } } }
-  const page = await receiver.project(agent)
-  assert.equal(page.configured, true)
-  assert.equal(page.project.root, await realpath(root))
-  assert.equal(page.project.name, 'nested-project')
-  const saved = await receiver.saveProject(agent, {
-    project: { ...page.project, namedRepositories: [{ name: 'Renamed', path: 'nested/repo' }] },
-    revision: page.revision, fileRevision: page.fileRevision,
-  })
-  assert.equal(saved.configured, true)
-  assert.equal((await readProjectFile(root)).project.namedRepositories[0].name, 'Renamed')
-  assert.equal(await readProjectFile(child), null)
-})
-
-test('enabled variable in configuration file decides whether multi-repository is active', async () => {
-  const { readProjectFile, writeProjectFile } = await import('../src/repository-project-file.ts')
-  const testRoot = join(directory, 'project-enabled-test')
-  await mkdir(join(testRoot, '.git'), { recursive: true })
-  await mkdir(join(testRoot, 'sub', '.git'), { recursive: true })
-
-  // 1. Initial write with enabled: true
-  const initialProject = {
-    name: 'TestProject',
-    root: testRoot,
-    enabled: true,
-    includeProjectRoot: true,
-    configFiles: [],
-    repositories: [],
-    namedRepositories: [{ name: 'Sub', path: 'sub' }],
-  }
-  const rev1 = await writeProjectFile(initialProject, '')
-  const read1 = await readProjectFile(testRoot)
-  assert.equal(read1.project.enabled, true)
-
-  const activeWs = await resolveReviewWorkspace(testRoot, [])
-  assert.equal(activeWs.repositories.length, 2) // root + sub
-
-  // 2. Disable multi-repository management with enabled: false
-  const rev2 = await writeProjectFile({ ...initialProject, enabled: false }, rev1)
-  const read2 = await readProjectFile(testRoot)
-  assert.equal(read2.project.enabled, false)
-
-  // With enabled: false, resolveReviewWorkspace falls back to single-directory
-  const inactiveWs = await resolveReviewWorkspace(testRoot, [])
-  assert.equal(inactiveWs.project, null)
-  assert.equal(inactiveWs.repositories.length, 0)
-  assert.deepEqual(inactiveWs.roots, [await realpath(testRoot)])
 })

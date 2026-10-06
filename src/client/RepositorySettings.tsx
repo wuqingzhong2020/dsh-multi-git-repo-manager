@@ -41,7 +41,6 @@ export function RepositorySettings({ ctx, sessionId }: { ctx: Context; sessionId
     : page?.configured
       ? t('projectSave')
       : t('projectGenerate')
-  const showImportHint = page?.fileRevision === '' && page.project.configFiles.length > 0
 
   return (
     <div className={css.scroll}>
@@ -116,7 +115,6 @@ export function RepositorySettings({ ctx, sessionId }: { ctx: Context; sessionId
             </label>
             <h3>{t('projectRepos')}</h3>
             <p className={css.hint}>{t('projectReposHint')}</p>
-            {showImportHint && <p className={css.hint}>{t('projectImportHint')}</p>}
             <RepositoryListEditor
               projectRoot={draft.root}
               entries={entries}

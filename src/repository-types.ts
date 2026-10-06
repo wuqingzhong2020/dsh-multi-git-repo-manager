@@ -1,7 +1,9 @@
-/** Serializable project configuration and repository preview shared by both faces. */
-export interface NamedReviewRepository { name: string; path: string }
+import type { Agent } from '@deepseek-ai/dsh-agent'
+
+/** Serializable management facts shared by the Host and browser. */
+export interface NamedTarget { name: string; path: string }
 export type ManagedTargetKind = 'git' | 'directory'
-export interface NamedManagedTarget extends NamedReviewRepository { kind: ManagedTargetKind }
+export interface NamedManagedTarget extends NamedTarget { kind: ManagedTargetKind }
 export interface ManagedTarget {
   id: string
   name: string
@@ -10,6 +12,7 @@ export interface ManagedTarget {
   relativePath: string
   source: string
   state: 'ready' | 'missing' | 'notGit' | 'error' | 'kindMismatch'
+  /** Own usable Git metadata; does not imply CLI, HEAD or comparison availability. */
   capabilities: { git: boolean }
   reason?: string
 }
@@ -22,71 +25,59 @@ export interface TargetPathResolution {
 }
 export interface TargetDiscovery { candidates: ManagedTarget[]; warnings: string[] }
 
-export interface ReviewProject {
+export interface ManagedProject {
   name: string
   root: string
+  enabled: boolean
   includeProjectRoot: boolean
-  configFiles: string[]
-  repositories: string[]
-  /** Repositories managed in the project-local JSON file. */
-  namedRepositories?: NamedReviewRepository[] | undefined
-  directories?: NamedReviewRepository[] | undefined
-  discovery?: { containers: string[] } | undefined
-  /** Whether multi-repository management is enabled for this project. */
-  enabled?: boolean | undefined
+  repositories: NamedTarget[]
+  directories: NamedTarget[]
+  discovery: { containers: string[] }
 }
 
-export interface ReviewRepository {
+/** Git projection for consumers that enumerate repositories. */
+export interface ManagedRepository {
   name: string
-  /** Display path relative to the current project root when the volume permits. */
   relativePath: string
-  /** Canonical absolute path used for file ownership and Host safety checks. */
   path: string
   source: string
   state: 'ready' | 'missing' | 'notGit' | 'error'
   reason?: string
 }
 
-export interface ReviewWorkspace {
-  project: ReviewProject | null
-  repositories: ReviewRepository[]
+export interface ManagedWorkspace {
+  project: ManagedProject | null
+  repositories: ManagedRepository[]
   warnings: string[]
-  /** Trusted canonical roots used by the Host, never supplied by an undo caller. */
   roots: string[]
-  /** Authoritative targets; repositories is the backwards compatible Git projection. */
-  targets?: ManagedTarget[]
-  boundaries?: string[]
-  workspaceRevision?: string
+  /** Complete ownership snapshot, including unavailable target boundaries. */
+  targets: ManagedTarget[]
+  boundaries: string[]
+  /** Management scope revision, independent of Git content versions. */
+  workspaceRevision: string
 }
 
-export interface ReviewProjectSettings {
-  projects: ReviewProject[]
-  revision: number
+/** Consumers read scope and admission without receiving configuration writers. */
+export interface ManagedWorkspaceReader {
+  workspace(agent: Agent): Promise<ManagedWorkspace>
+  resolveTargetPaths(agent: Agent, paths: string[]): Promise<TargetPathResolution[]>
 }
 
-export type SaveReviewProjects = ReviewProjectSettings
+/** The Profile indexes project files; it never contains a second target list. */
+export interface ProjectIndexEntry { root: string }
+export interface ProjectIndexSettings { projects: ProjectIndexEntry[]; revision: number }
+export type SaveProjectIndex = ProjectIndexSettings
 
-export interface ReviewProjectPage {
-  project: ReviewProject
+export interface ManagedProjectPage {
+  project: ManagedProject
   revision: number
   configured: boolean
-  workspace: ReviewWorkspace
-  /** Hash of the project-local file, used to reject stale saves. */
+  workspace: ManagedWorkspace
   fileRevision: string
-  /** Session-only absolute repositories, excluded from the project file. */
-  temporaryRepositories: NamedReviewRepository[]
-  temporaryTargets?: NamedManagedTarget[]
+  temporaryTargets: NamedManagedTarget[]
 }
-
-export interface SaveReviewProject {
-  project: ReviewProject
+export interface SaveManagedProject {
+  project: ManagedProject
   revision: number
   fileRevision: string
 }
-
-export type NamedRepository = NamedReviewRepository
-export type RepositoryProject = ReviewProject
-export type Repository = ReviewRepository
-export type RepositoryWorkspace = ReviewWorkspace
-export type RepositoryProjectPage = ReviewProjectPage
-export type SaveRepositoryProject = SaveReviewProject

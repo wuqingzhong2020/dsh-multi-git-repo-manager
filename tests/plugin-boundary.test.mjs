@@ -12,56 +12,51 @@ import { REPOSITORY_INVOCATIONS } from '../src/typert-descriptors.ts'
 import { attachLocale, en, zh, t } from '../src/client/locales.ts'
 import { localizeReviewMessage } from '../src/client/message-locales.ts'
 
-const project = (root, name) => ({ root, name, includeProjectRoot: true, configFiles: [], repositories: [] })
-
-test('the standalone plugin reads volatile config and registers a shared session service', async () => {
+test('the standalone plugin reads a volatile locator index and registers one session service', async () => {
   const ctx = new Context()
   const directory = await mkdtemp(join(tmpdir(), 'dsh-manager-boundary-'))
   try {
     const root = await realpath(directory)
-    await ctx.plugin(manager, { projects: [project(root, 'Manager')] }).await()
+    await ctx.plugin(manager, { projects: [{ root }] }).await()
     const service = ctx.get('multiGitRepoManagerByWqz')
     assert.ok(service)
-    service.adoptLegacyProjects([project(root, 'Legacy')])
     const page = await service.project({ id: 'session', session: { header: { cwd: root } } })
     assert.equal(page.project.root, root)
-    assert.ok(Array.isArray(page.workspace.roots))
-    assert.equal(service.projectSettings.get().projects[0].name, 'Manager')
+    assert.ok(Array.isArray(page.workspace.targets))
+    assert.deepEqual(service.projectSettings.get().projects, [{ root }])
+    assert.equal(typeof service.adoptLegacyProjects, 'undefined')
   } finally { await ctx.fiber.dispose(); await rm(directory, { recursive: true, force: true }) }
 })
 
-test('legacy Profile indexes merge into the manager namespace with manager values taking precedence', async () => {
+test('native settings own only a revision-fenced project locator index', async () => {
   const fiber = {}
-  let current = { projects: [project('/manager', 'Manager')], revision: 4 }
+  let current = { projects: [{ root: '/manager' }], revision: 4 }
   const writes = []
   const native = {
     configure: () => () => {},
-    describe: () => [{ ns: 'manager-settings', ...structuredClone(current), value: { projects: current.projects } }],
+    describe: () => [{ ns: 'manager-settings', revision: current.revision, value: { projects: current.projects } }],
     update: async (ns, value, revision) => {
       assert.equal(ns, 'manager-settings')
-      assert.equal(revision, current.revision)
-      writes.push(value)
-      current = { ...value, revision: revision + 1 }
+      if (revision !== current.revision) throw new Error('Stale native settings revision')
+      writes.push(value); current = { ...value, revision: revision + 1 }
     },
   }
   const ctx = {
-    fiber,
-    inject: (_deps, callback) => callback({ settings: native }),
-    effect: callback => callback(),
+    fiber, inject: (_deps, callback) => callback({ settings: native }), effect: callback => callback(),
     get: () => ({ entries: () => [{ fiber, options: { id: 'manager-settings', name: 'dsh-multi-git-repo-manager' } }] }),
   }
   const settings = new manager.RepositorySettings(ctx)
-  settings.adoptLegacyProjects([project('/manager', 'Old'), project('/legacy', 'Imported')])
-  assert.deepEqual(settings.get().projects.map(p => p.name), ['Manager', 'Imported'])
-  await settings.save(settings.get())
-  assert.equal(writes.length, 1)
-  assert.equal(settings.get().revision, 5)
+  assert.deepEqual(settings.get().projects, [{ root: '/manager' }])
+  await settings.save({ projects: [{ root: '/second' }], revision: 4 })
+  assert.equal(writes.length, 1); assert.equal(settings.get().revision, 5)
+  await assert.rejects(settings.save({ projects: [], revision: 4 }), /Stale/)
+  await assert.rejects(settings.save({ projects: [{ root: '/second', repositories: ['forbidden'] }], revision: 5 }))
   await settings.save({ projects: [], revision: 5 })
   assert.deepEqual(settings.get().projects, [])
 })
 
 test('the manager protocol owns repository and target operations with strict session lookup', () => {
-  assert.deepEqual(REPOSITORY_INVOCATIONS.map(d => d.method), ['setTemporaryTargets', 'resolveTargetPaths', 'discoverTargets', 'directoryStart', 'workspace', 'project', 'saveProject', 'setTemporaryRepositories'])
+  assert.deepEqual(REPOSITORY_INVOCATIONS.map(d => d.method), ['setTemporaryTargets', 'resolveTargetPaths', 'discoverTargets', 'directoryStart', 'workspace', 'project', 'saveProject'])
   for (const descriptor of REPOSITORY_INVOCATIONS) {
     assert.equal(descriptor.service, 'multiGitRepoManagerByWqz')
     assert.equal(descriptor.namespace, 'multiGitRepoManagerByWqz')

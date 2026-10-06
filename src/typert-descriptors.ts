@@ -1,7 +1,7 @@
 import { MULTI_GIT_REPO_MANAGER_SERVICE_NAME } from './service-names.ts'
 import { z } from 'zod'
 import type { InvocationDescriptor } from '@deepseek-ai/dsh-typert-protocol'
-import { namedManagedTargetSchema, namedReviewRepositorySchema, reviewProjectPageSchema, reviewProjectSchema, reviewWorkspaceSchema, saveReviewProjectSchema, targetDiscoverySchema, targetPathResolutionSchema } from './repository-schemas.ts'
+import { namedManagedTargetSchema, managedProjectPageSchema, managedProjectSchema, managedWorkspaceSchema, saveManagedProjectSchema, targetDiscoverySchema, targetPathResolutionSchema } from './repository-schemas.ts'
 
 export const PACKAGE_NAME = 'dsh-multi-git-repo-manager'
 
@@ -13,9 +13,9 @@ const agentCodec = {
 
 export const REPOSITORY_INVOCATIONS: readonly InvocationDescriptor[] = [
   ...[
-    { method: 'setTemporaryTargets', parameter: 'entries', schema: z.array(namedManagedTargetSchema).max(512), result: reviewWorkspaceSchema },
+    { method: 'setTemporaryTargets', parameter: 'entries', schema: z.array(namedManagedTargetSchema).max(512), result: managedWorkspaceSchema },
     { method: 'resolveTargetPaths', parameter: 'paths', schema: z.array(z.string().min(1).max(4096)).max(4096), result: z.array(targetPathResolutionSchema) },
-    { method: 'discoverTargets', parameter: 'project', schema: reviewProjectSchema, result: targetDiscoverySchema },
+    { method: 'discoverTargets', parameter: 'project', schema: managedProjectSchema, result: targetDiscoverySchema },
   ].map(({ method, parameter, schema, result }): InvocationDescriptor => ({
     id: `${PACKAGE_NAME}#${MULTI_GIT_REPO_MANAGER_SERVICE_NAME}/${method}`, service: MULTI_GIT_REPO_MANAGER_SERVICE_NAME, namespace: MULTI_GIT_REPO_MANAGER_SERVICE_NAME,
     method, invocation: { kind: 'direct' }, scope: { context: 'agent', wire: 'agentId' },
@@ -38,13 +38,13 @@ export const REPOSITORY_INVOCATIONS: readonly InvocationDescriptor[] = [
     id: `${PACKAGE_NAME}#${MULTI_GIT_REPO_MANAGER_SERVICE_NAME}/workspace`, service: MULTI_GIT_REPO_MANAGER_SERVICE_NAME, namespace: MULTI_GIT_REPO_MANAGER_SERVICE_NAME,
     method: 'workspace', invocation: { kind: 'direct' }, scope: { context: 'agent', wire: 'agentId' },
     parameters: [{ name: 'agent', wire: 'agentId', source: 'lookup', lookup: 'agent', codec: agentCodec }],
-    result: { mode: 'strict', typeSymbol: `${PACKAGE_NAME}#ReviewWorkspace`, create: () => reviewWorkspaceSchema },
+    result: { mode: 'strict', typeSymbol: `${PACKAGE_NAME}#ManagedWorkspace`, create: () => managedWorkspaceSchema },
   },
   {
     id: `${PACKAGE_NAME}#${MULTI_GIT_REPO_MANAGER_SERVICE_NAME}/project`, service: MULTI_GIT_REPO_MANAGER_SERVICE_NAME, namespace: MULTI_GIT_REPO_MANAGER_SERVICE_NAME,
     method: 'project', invocation: { kind: 'direct' }, scope: { context: 'agent', wire: 'agentId' },
     parameters: [{ name: 'agent', wire: 'agentId', source: 'lookup', lookup: 'agent', codec: agentCodec }],
-    result: { mode: 'strict', typeSymbol: `${PACKAGE_NAME}#ReviewProjectPage`, create: () => reviewProjectPageSchema },
+    result: { mode: 'strict', typeSymbol: `${PACKAGE_NAME}#ManagedProjectPage`, create: () => managedProjectPageSchema },
   },
   {
     id: `${PACKAGE_NAME}#${MULTI_GIT_REPO_MANAGER_SERVICE_NAME}/saveProject`, service: MULTI_GIT_REPO_MANAGER_SERVICE_NAME, namespace: MULTI_GIT_REPO_MANAGER_SERVICE_NAME,
@@ -52,20 +52,9 @@ export const REPOSITORY_INVOCATIONS: readonly InvocationDescriptor[] = [
     parameters: [
       { name: 'agent', wire: 'agentId', source: 'lookup', lookup: 'agent', codec: agentCodec },
       { name: 'request', wire: 'request', source: 'json', codec: {
-        mode: 'strict', typeSymbol: `${PACKAGE_NAME}#SaveReviewProject`, create: () => saveReviewProjectSchema,
+        mode: 'strict', typeSymbol: `${PACKAGE_NAME}#SaveManagedProject`, create: () => saveManagedProjectSchema,
       } },
     ],
-    result: { mode: 'strict', typeSymbol: `${PACKAGE_NAME}#ReviewProjectPage`, create: () => reviewProjectPageSchema },
-  },
-  {
-    id: `${PACKAGE_NAME}#${MULTI_GIT_REPO_MANAGER_SERVICE_NAME}/setTemporaryRepositories`, service: MULTI_GIT_REPO_MANAGER_SERVICE_NAME, namespace: MULTI_GIT_REPO_MANAGER_SERVICE_NAME,
-    method: 'setTemporaryRepositories', invocation: { kind: 'direct' }, scope: { context: 'agent', wire: 'agentId' },
-    parameters: [
-      { name: 'agent', wire: 'agentId', source: 'lookup', lookup: 'agent', codec: agentCodec },
-      { name: 'entries', wire: 'entries', source: 'json', codec: {
-        mode: 'strict', typeSymbol: `${PACKAGE_NAME}#NamedReviewRepositories`, create: () => z.array(namedReviewRepositorySchema).max(512),
-      } },
-    ],
-    result: { mode: 'strict', typeSymbol: `${PACKAGE_NAME}#ReviewWorkspace`, create: () => reviewWorkspaceSchema },
+    result: { mode: 'strict', typeSymbol: `${PACKAGE_NAME}#ManagedProjectPage`, create: () => managedProjectPageSchema },
   },
 ]

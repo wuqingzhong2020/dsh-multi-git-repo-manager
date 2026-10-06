@@ -1,4 +1,4 @@
-import type { ReviewRepository } from '../repository-types.ts'
+import type { ManagedRepository } from '../repository-types.ts'
 
 /** Browser-side path labels; the Host independently enforces canonical roots. */
 export function normalizeReviewPath(path: string): string {
@@ -90,7 +90,7 @@ export function repositoryProjectPath(root: string, input: string): string {
   return relativeProjectDirectory(root, target) ?? target
 }
 
-export function fileRepository<T extends Pick<ReviewRepository, 'name' | 'path' | 'source'> & { state: string }>(
+export function fileRepository<T extends Pick<ManagedRepository, 'name' | 'path' | 'source'> & { state: string }>(
   path: string,
   repositories: readonly T[],
 ): T | undefined {
@@ -105,7 +105,7 @@ export function fileRepository<T extends Pick<ReviewRepository, 'name' | 'path' 
   return owner?.state === 'ready' ? owner : undefined
 }
 
-export function repositoryRelativePath(path: string, repo: Pick<ReviewRepository, 'path' | 'name'>): string {
+export function repositoryRelativePath(path: string, repo: Pick<ManagedRepository, 'path' | 'name'>): string {
   return (
     normalizeReviewPath(path).slice(normalizeReviewPath(repo.path).length).replace(/^\//, '') ||
     repo.name

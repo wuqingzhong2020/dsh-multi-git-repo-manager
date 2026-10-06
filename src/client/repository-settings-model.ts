@@ -1,82 +1,43 @@
-import type { NamedManagedTarget, NamedReviewRepository, ReviewProject, ReviewWorkspace } from '../repository-types.ts'
-import {
-  absoluteReviewPath,
-  normalizeReviewPath,
-  relativeProjectDirectory,
-  repositoryProjectPath,
-} from './repository-paths.ts'
+import type { NamedManagedTarget, ManagedProject } from '../repository-types.ts'
+import { absoluteReviewPath, repositoryProjectPath } from './repository-paths.ts'
 
-/** Trim complete rows and normalize paths before the Host validates and saves them. */
-export function prepareProjectForSave(project: ReviewProject): ReviewProject {
+/** Trim complete rows; the Host owns canonical validation and persistence. */
+export function prepareProjectForSave(project: ManagedProject): ManagedProject {
+  const normalize = (entries: ManagedProject['repositories']) => entries
+    .filter(entry => entry.name.trim() !== '' && entry.path.trim() !== '')
+    .map(entry => ({ name: entry.name.trim(), path: repositoryProjectPath(project.root, entry.path) }))
   return {
-    ...project,
-    name: project.name.trim(),
-    enabled: project.enabled ?? true,
-    configFiles: [],
-    repositories: [],
-    namedRepositories: (project.namedRepositories ?? [])
-      .filter(entry => entry.name.trim() !== '' && entry.path.trim() !== '')
-      .map(entry => ({
-        name: entry.name.trim(),
-        path: repositoryProjectPath(project.root, entry.path),
-      })),
-    ...(project.directories ? { directories: project.directories.filter(entry => entry.name.trim() && entry.path.trim()).map(entry => ({ name: entry.name.trim(), path: repositoryProjectPath(project.root, entry.path) })) } : {}),
+    ...project, name: project.name.trim(),
+    repositories: normalize(project.repositories), directories: normalize(project.directories),
   }
 }
 
-/** Combine resolved repositories and session-only entries in their displayed order. */
+/** Keep declarations in the editor, including unavailable and temporary targets. */
 export function createRepositoryDraft(
-  project: ReviewProject,
-  workspace: ReviewWorkspace,
-  temporary: NamedReviewRepository[],
-): ReviewProject {
-  const entries = workspace.repositories
-    .filter(repo => repo.source !== 'project')
-    .map(repo => ({ name: repo.name, path: repo.relativePath }))
+  project: ManagedProject,
+  temporary: NamedManagedTarget[],
+): ManagedProject {
+  const entries = [...draftTargets(project)]
   for (const entry of temporary) {
-    const path = normalizeReviewPath(entry.path).toLowerCase()
-    const alreadyListed = entries.some(
-      current => normalizeReviewPath(current.path).toLowerCase() === path,
-    )
-    if (!alreadyListed) entries.push(entry)
+    if (!entries.some(current => current.path === entry.path && current.kind === entry.kind)) entries.push(entry)
   }
-  return {
-    ...project,
-    enabled: project.enabled ?? true,
-    configFiles: [],
-    repositories: [],
-    namedRepositories: entries,
-    directories: workspace.targets?.filter(target => target.kind === 'directory' && target.source !== 'project').map(target => ({ name: target.name, path: target.relativePath })) ?? project.directories,
-  }
+  return { ...project, ...withDraftTargets(entries) }
 }
 
-/** The editor shares one typed row model; the portable JSON retains two explicit lists. */
-export function draftTargets(project: ReviewProject): NamedManagedTarget[] {
+/** One editor row model maps to the two explicit lists in the portable v2 file. */
+export function draftTargets(project: ManagedProject): NamedManagedTarget[] {
   return [
-    ...(project.namedRepositories ?? []).map(entry => ({ ...entry, kind: 'git' as const })),
-    ...(project.directories ?? []).map(entry => ({ ...entry, kind: 'directory' as const })),
+    ...project.repositories.map(entry => ({ ...entry, kind: 'git' as const })),
+    ...project.directories.map(entry => ({ ...entry, kind: 'directory' as const })),
   ]
 }
-export function withDraftTargets(entries: NamedManagedTarget[]): Pick<ReviewProject, 'namedRepositories' | 'directories'> {
+export function withDraftTargets(entries: NamedManagedTarget[]): Pick<ManagedProject, 'repositories' | 'directories'> {
   return {
-    namedRepositories: entries.filter(entry => entry.kind === 'git').map(({ name, path }) => ({ name, path })),
+    repositories: entries.filter(entry => entry.kind === 'git').map(({ name, path }) => ({ name, path })),
     directories: entries.filter(entry => entry.kind === 'directory').map(({ name, path }) => ({ name, path })),
   }
 }
-export function collectTemporaryTargets(project: ReviewProject): NamedManagedTarget[] {
-  return draftTargets(project).map(entry => ({ ...entry, name: entry.name.trim(), path: repositoryProjectPath(project.root, entry.path) }))
-    .filter(entry => entry.name && entry.path && absoluteReviewPath(entry.path))
-}
-
-/** Keep external absolute paths in the session instead of the portable project file. */
-export function collectTemporaryRepositories(project: ReviewProject): NamedReviewRepository[] {
-  return (project.namedRepositories ?? [])
-    .map(entry => ({ ...entry, path: repositoryProjectPath(project.root, entry.path) }))
-    .filter(
-      entry =>
-        entry.name.trim() &&
-        absoluteReviewPath(entry.path) &&
-        relativeProjectDirectory(project.root, entry.path) === null,
-    )
-    .map(entry => ({ name: entry.name.trim(), path: normalizeReviewPath(entry.path.trim()) }))
+export function collectTemporaryTargets(project: ManagedProject): NamedManagedTarget[] {
+  return draftTargets(prepareProjectForSave(project))
+    .filter(entry => absoluteReviewPath(entry.path))
 }

@@ -1,9 +1,10 @@
 /** File admission uses the most specific target, including unavailable boundaries. */
 import { lstat, realpath } from 'node:fs/promises'
 import { dirname, relative, resolve, sep } from 'node:path'
-import type { ReviewWorkspace, TargetPathResolution } from './repository-types.ts'
+import type { ManagedWorkspace, TargetPathResolution } from './repository-types.ts'
 import { inside } from './repository-path-policy.ts'
-import { canonicalPathKey, hasOwnGit, inspectTarget } from './managed-target.ts'
+import { canonicalPathKey, hasOwnGit } from './managed-target.ts'
+import { managedWorkspaceSchema } from './repository-schemas.ts'
 
 async function canonicalFile(path: string): Promise<string> {
   let current = path
@@ -19,14 +20,10 @@ async function canonicalFile(path: string): Promise<string> {
   }
 }
 
-export async function resolveTargetPaths(workspace: ReviewWorkspace, cwd: string, inputs: readonly string[]): Promise<TargetPathResolution[]> {
-  const fallback = workspace.project == null
-    ? [await inspectTarget(await realpath(cwd), { name: 'Workspace', path: cwd, source: 'project' })]
-    : []
-  const legacy = workspace.targets === undefined && workspace.project != null
-    ? await Promise.all(workspace.roots.map(path => inspectTarget(workspace.project!.root, { name: 'Workspace', path, source: 'legacy' }))) : []
-  const targets = workspace.targets ?? [...fallback, ...legacy]
-  const containers = workspace.boundaries ?? []
+export async function resolveTargetPaths(workspace: ManagedWorkspace, cwd: string, inputs: readonly string[]): Promise<TargetPathResolution[]> {
+  // Reject incomplete snapshots even from untyped Host callers; roots alone admit nothing.
+  managedWorkspaceSchema.parse(workspace)
+  const { targets, boundaries: containers } = workspace
   const ordered = [...targets].sort((a, b) => b.path.length - a.path.length)
   const resolveOne = async (input: string): Promise<TargetPathResolution> => {
     const requested = resolve(cwd, input)
