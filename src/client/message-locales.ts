@@ -6,7 +6,7 @@ const diagnostics: Readonly<Record<string, string>> = {
   'Project root does not belong to this session': '工程根目录不属于当前会话',
   'Enable this project before adding temporary targets': '请先启用该工程，再添加临时目标',
   'Temporary targets must use absolute paths outside the project': '临时目标必须使用工程目录外的绝对路径',
-  'dsh-file-review-repositories.json requires configuration version 2': 'dsh-file-review-repositories.json 必须使用 v2 配置格式',
+  'dsh-multi-git-repo.json requires configuration version 2': 'dsh-multi-git-repo.json 必须使用 v2 配置格式',
   'Persisted targets must be inside the project': '持久目标必须位于工程目录内',
   'Discovery containers must be inside the project': '发现容器必须位于工程目录内',
   'A target cannot be declared as both Git and directory': '同一目标不能同时声明为 Git 仓库和普通目录',

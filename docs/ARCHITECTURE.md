@@ -46,7 +46,7 @@ function createConsumer(reader: ManagedWorkspaceReader) {
 
 ## 配置与会话
 
-`dsh-file-review-repositories.json` 是唯一持久目标声明，统一采用 v2。文件位置确定工程根，机器根路径不写入 JSON。`repositories` 和 `directories` 为显式名称/路径列表；`discovery.containers` 可省略，读取后正规化为空列表。格式不匹配、未知字段、超过限制或持久外部目标均拒绝，不进行格式升级、清单导入或历史配置兼容。
+`dsh-multi-git-repo.json` 是唯一持久目标声明，统一采用 v2。文件位置确定工程根，机器根路径不写入 JSON。`repositories` 和 `directories` 为显式名称/路径列表；`discovery.containers` 可省略，读取后正规化为空列表。格式不匹配、未知字段、超过限制或持久外部目标均拒绝，不进行格式升级、清单导入或历史配置兼容。
 
 Profile 仅保存 `projects: [{ root }]` 及 native settings 修订，作为定位索引。读取最近的工程文件并检查启用状态；索引本身不能授权范围。最近文件无效时明确失败，不能跳到父工程扩大范围；最近文件禁用时回到当前会话基础范围。无配置工程也使用当前会话目录的基础目标。
 

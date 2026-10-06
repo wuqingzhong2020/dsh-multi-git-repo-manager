@@ -43,7 +43,7 @@ Choose **Add to list** for each desired ready candidate and save. Discovery resu
 
 ## 4. Save and reload
 
-The manager owns `dsh-file-review-repositories.json`; consumers read its authoritative management results.
+The manager owns `dsh-multi-git-repo.json`; consumers read its authoritative management results.
 
 | Field | Meaning |
 | --- | --- |
@@ -97,7 +97,7 @@ The review consumer supports recorded Last turn, This session and Pending review
 | Problem | Action |
 | --- | --- |
 | Missing management entry | Enable the plugin, select a project conversation and use the right-sidebar Start page |
-| Old text after installation | Fully restart; install same-version builds under a new digest filename and verify Client hashes |
+| Old text after installation | Fully restart; use the aggregate install command to force a local package refresh and verify Client hashes |
 | Picker ignores the current path | Check starting-path support; the 0.2.0-rc.2 adapter and backup instructions are in the README |
 | Preview exists but extra targets are inactive | Generate, save and enable the file; previews do not authorize extra scope |
 | Target becomes unavailable after changing kind | Check actual metadata and paths, then save and reload |

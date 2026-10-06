@@ -8,7 +8,7 @@ import type { ManagedProject } from './repository-types.ts'
 import { namedTargetSchema } from './repository-schemas.ts'
 import { canonicalRepositoryPath } from './repository-path-policy.ts'
 
-export const PROJECT_FILE_NAME = 'dsh-file-review-repositories.json'
+export const PROJECT_FILE_NAME = 'dsh-multi-git-repo.json'
 
 const fileSchema = z.object({
   version: z.literal(2),

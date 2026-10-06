@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, relative, sep } from 'node:path'
 import { inside, previewProject, resolveManagedWorkspace } from '../src/repository-workspace.ts'
 import { absoluteReviewPath, fileRepository, normalizeReviewPath, relativeProjectDirectory, repositoryProjectPath, repositoryRelativePath } from '../src/client/repository-paths.ts'
-import { readProjectFile, writeProjectFile, PROJECT_FILE_NAME } from '../src/repository-project-file.ts'
+import { findProjectFile, readProjectFile, writeProjectFile, PROJECT_FILE_NAME } from '../src/repository-project-file.ts'
 import { managedWorkspaceSchema } from '../src/repository-schemas.ts'
 import { MultiGitRepoManager, resolveTargetPaths } from '../lib/index.js'
 import { Context } from '@deepseek-ai/cordis'
@@ -32,6 +32,16 @@ const manager = store => {
   return new MultiGitRepoManager(ctx, store)
 }
 const agent = (cwd, id = cwd) => ({ id, session: { header: { cwd } } })
+
+test('project configuration is created and discovered as dsh-multi-git-repo.json', async () => {
+  const root = await directory('project-filename')
+  const child = await directory('project-filename/child')
+  await writeProjectFile(project(root), '')
+  const file = JSON.parse(await readFile(join(root, 'dsh-multi-git-repo.json'), 'utf8'))
+  assert.equal(file.version, 2)
+  const found = await findProjectFile(child)
+  assert.equal(found.project.root, await realpath(root))
+})
 
 test('plain aggregate and file-style Git marker have distinct ownership', async () => {
   const root = await directory('worktree'); const worktree = await directory('worktree/child')

@@ -28,7 +28,7 @@ Host 服务与 Remote 命名空间为 `multiGitRepoManagerByWqz`，配套审查�
 
 - **Git 与普通目录统一管理**：添加、命名、编辑和移除两类目标，分别显示 Git、非 Git 目录和不可用数量。移除条目只改变配置，不删除磁盘目录。
 - **右侧原生 Tab**：使用宿主 `sidebarRightTabs` 及正文／标题插槽，无需第三方侧栏插件；隐藏和切换 Tab 保留当前表单，窄侧栏按容器宽度调整布局。
-- **工程级配置**：启停多目标范围、选择是否包含工程根目录，将内部目标保存到 `dsh-file-review-repositories.json`。可从工程子目录自动找到最近的配置文件。
+- **工程级配置**：启停多目标范围、选择是否包含工程根目录，将内部目标保存到 `dsh-multi-git-repo.json`。可从工程子目录自动找到最近的配置文件。
 - **统一 v2 配置**：Git 与普通目录使用显式列表，格式不匹配时拒绝；不提供清单导入或格式升级。
 - **直接子目录发现**：使用可配置容器，例如 `project`、`project/plugins`；预览只产生候选，逐项添加并保存后才纳管，容器本身不会自动加入。
 - **自身类型与状态检查**：识别 Git 根目录和 worktree 的 `.git` 文件；普通目录无自身 Git 时可用，类型不匹配、路径缺失或损坏元数据保留诊断。
@@ -41,7 +41,7 @@ Host 服务与 Remote 命名空间为 `multiGitRepoManagerByWqz`，配套审查�
 
 目标接口为 **DSH 正式版 >=0.2.0**，同时保留 **0.2.0-rc.2** 测试通道。实际验证使用 Windows 的 `D:\app\DeepSeekHarnessDesktop\DeepSeek Harness.exe`，宿主为 0.2.0-rc.2。正式版／较新稳定版、完整 Web 宿主和其他平台尚未完成实际验证；声明的接口范围不等于全部平台均已验收。
 
-本地构建产物为 `dist/dsh-multi-git-repo-manager-0.1.4.tgz` 及 `.sha256`。维护者可交付本地包，公开安装则在 [GitHub Release](https://github.com/wuqingzhong2020/dsh-multi-git-repo-manager/releases) 上传同名资产后提供下载；本仓库的验证记录是本地交付记录，不代表已发布 Release。
+本地安装包统一输出到多仓主工程根目录 `dist/`：`<包名>-<版本>.tgz` 按版本归档，同版本重新构建时覆盖，版本升级保留旧版本，内容完全一致的最新副本为 `dist/latest/dsh-multi-git-repo-manager.tgz`，配套 `.sha256` 和 `.json` 版本索引。从本插件目录访问为 `../../dist/`。独立检出时默认输出到仓库上一级的 `dist/`；打包脚本支持 `MRM_DIST_DIR` 指定目录。主工程 `python envBuild.py desktop install` 根据 latest 索引校验并安装对应历史包。公开安装则在 [GitHub Release](https://github.com/wuqingzhong2020/dsh-multi-git-repo-manager/releases) 上传约定资产后提供下载；本仓库的验证记录是本地交付记录，不代表已发布 Release。
 
 ### DeepSeek Harness Desktop
 
@@ -59,14 +59,15 @@ pnpm --dir "$env:USERPROFILE\.dsh\profiles\desktop" add "D:\Downloads\dsh-multi-
 
 重新启动后，在「插件」页确认所需插件已启用，并从右侧开始页打开管理 Tab。**安装与启用是两件事**：DSH 0.2 只加载 `dsh.profile.bundles` 中选中的插件，安装 npm 依赖本身不会自动加载管理服务。管理插件可单独启用；使用审查消费者时两者均须启用。
 
-同版本重新构建时，pnpm 可能复用同路径本地包。先将 tgz 复制为包含 SHA256 摘要的新文件名，再安装该路径；安装后核对 Profile 中 Host／Client 文件与构建的哈希。仅看到版本号 0.1.4，不能证明使用了最新构建。
+同版本重新构建时，主工程 Desktop 安装命令会强制刷新本地包缓存；手动安装也需刷新缓存。安装后核对 Profile 中 Host／Client 文件与构建的哈希。仅看到版本号 0.1.4，不能证明使用了最新构建。
 
 ### 独立 Web Profile
 
 在管理仓库根目录，用已有本地包安装：
 
 ```sh
-dsh plugin --profile web add ./dist/dsh-multi-git-repo-manager-0.1.4.tgz
+$build = Get-Content ../../dist/latest/dsh-multi-git-repo-manager.json -Raw | ConvertFrom-Json
+dsh plugin --profile web add ("../../dist/" + $build.history)
 ```
 
 公开 Release 和同名资产准备完成后，可使用固定版本 URL：
@@ -98,7 +99,7 @@ node "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\dsh-multi-git-repo-man
 
 ### 配置示例
 
-文件名继续使用 **`dsh-file-review-repositories.json`**，现有工程无需改名。包含普通目录与发现容器的 v2 示例：
+工程配置文件为 **`dsh-multi-git-repo.json`**。包含普通目录与发现容器的 v2 示例：
 
 ```json
 {

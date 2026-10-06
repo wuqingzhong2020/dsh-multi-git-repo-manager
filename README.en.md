@@ -28,7 +28,7 @@ Maintainers should also read the [release and marketplace guide](docs/RELEASING.
 
 - **Typed targets:** add, name, edit and remove Git repositories and ordinary directories, with separate Git/directory/unavailable counts. Removing an entry does not remove files.
 - **Native sidebar tab:** use the host's tab, title and body slots; switching or hiding tabs preserves the form. Container-based layout adapts to narrow panes.
-- **Project configuration:** enable/disable multi-target scope, optionally include the project root, and save internal targets in `dsh-file-review-repositories.json`. Conversations in subdirectories discover the nearest project file.
+- **Project configuration:** enable/disable multi-target scope, optionally include the project root, and save internal targets in `dsh-multi-git-repo.json`. Conversations in subdirectories discover the nearest project file.
 - **V2-only configuration:** explicit Git and directory lists; invalid formats are rejected, with no imports or format upgrades.
 - **Direct-child discovery:** configure containers such as `project` and `project/plugins`. Discovery returns candidates; explicitly add and save them to manage them. Containers do not become targets automatically.
 - **Type and availability checks:** recognize independent Git roots and worktree `.git` files. Ordinary directories without their own Git metadata are ready; missing paths, damaged metadata and kind mismatches retain diagnostics.
@@ -41,7 +41,7 @@ Maintainers should also read the [release and marketplace guide](docs/RELEASING.
 
 The declared target is **DSH >=0.2.0**, with **0.2.0-rc.2** supported as a test channel. Actual validation used Windows Desktop 0.2.0-rc.2 at `D:\app\DeepSeekHarnessDesktop\DeepSeek Harness.exe`. Stable/newer hosts, the complete Web host and other platforms have not completed real-host validation.
 
-Local builds produce `dist/dsh-multi-git-repo-manager-0.1.4.tgz` and its `.sha256`. Public download URLs require the matching asset to be uploaded to [GitHub Releases](https://github.com/wuqingzhong2020/dsh-multi-git-repo-manager/releases) first. Existing validation records describe local delivery, rather than confirming a public release.
+Local packages use the aggregate project's root `dist/`. Archives use `<name>-<version>.tgz`; rebuilding the same version replaces it, while different versions remain available; the identical latest copy is `dist/latest/dsh-multi-git-repo-manager.tgz`, with `.sha256` and a `.json` version index. These are accessible as `../../dist/` from this plugin directory. Standalone checkouts use `dist/` beside the repository; `MRM_DIST_DIR` can select the output directory. The aggregate project's `python envBuild.py desktop install` verifies the latest index and installs the corresponding history archive. Public download URLs require the matching release asset to be uploaded to [GitHub Releases](https://github.com/wuqingzhong2020/dsh-multi-git-repo-manager/releases) first. Existing validation records describe local delivery, rather than confirming a public release.
 
 ### DeepSeek Harness Desktop
 
@@ -59,14 +59,15 @@ pnpm --dir "$env:USERPROFILE\.dsh\profiles\desktop" add "D:\Downloads\dsh-multi-
 
 Restart, confirm the required plugins are enabled on the Plugins page, and open management from the right-sidebar Start page. **Installation and enablement are separate:** DSH 0.2 loads only selected `dsh.profile.bundles`. An npm dependency does not select its plugin. The manager may run alone; review requires both plugins.
 
-For a new build with the same version, copy the tgz to a filename containing its SHA256 prefix before installation. pnpm may reuse an archive at the same path. Verify installed Host/Client hashes against the build; a displayed version alone does not identify the latest build.
+For a new build with the same version, the aggregate Desktop installer forces a refresh of the local package cache. Manual installation must refresh that cache too. Verify installed Host/Client hashes against the build; a displayed version alone does not identify the latest build.
 
 ### Standalone Web Profile
 
 From the manager repository, install an existing local archive:
 
 ```sh
-dsh plugin --profile web add ./dist/dsh-multi-git-repo-manager-0.1.4.tgz
+$build = Get-Content ../../dist/latest/dsh-multi-git-repo-manager.json -Raw | ConvertFrom-Json
+dsh plugin --profile web add ("../../dist/" + $build.history)
 ```
 
 After the public release and matching asset exist:
@@ -98,7 +99,7 @@ An included project root is classified using its own metadata. A non-Git root be
 
 ### Configuration example
 
-Keep the existing filename **`dsh-file-review-repositories.json`**. A v2 project with directories and discovery:
+The project configuration filename is **`dsh-multi-git-repo.json`**. A v2 project with directories and discovery:
 
 ```json
 {

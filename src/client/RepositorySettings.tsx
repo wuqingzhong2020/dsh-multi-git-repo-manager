@@ -89,7 +89,7 @@ export function RepositorySettings({ ctx, sessionId }: { ctx: Context; sessionId
             </label>
             <label className={css.field}>
               {t('projectConfigFile')}
-              <input value="dsh-file-review-repositories.json" readOnly />
+              <input value="dsh-multi-git-repo.json" readOnly />
             </label>
             {!page?.configured && <p className={css.hint}>{t('projectInactive')}</p>}
             <label className={css.check}>

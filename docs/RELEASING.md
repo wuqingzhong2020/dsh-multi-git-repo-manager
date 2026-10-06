@@ -31,13 +31,14 @@ pnpm test
 pnpm test:pack
 ```
 
-最后一步生成版本对应的 tgz 和 SHA256，检查 exports、内部模块、浏览器依赖及归档内容。包包含 `lib/`、类型声明、`cordis.patch.yml`、目录选择适配脚本、README、docs 和 LICENSE；不包含源码测试目录、工作区本地链接或 `node_modules/`。
+最后一步检查 exports、内部模块、浏览器依赖及归档内容，通过后生成两份字节相同的 tgz：主工程 `dist/` 下 `<包名>-<版本>.tgz` 版本归档，以及 `dist/latest/dsh-multi-git-repo-manager.tgz` 最新副本；分别配套 SHA256，latest 另有 JSON 版本及历史路径索引。索引中的 `buildTime` 记录 `lib/client.js` 编译产物的生成时间，使用 UTC ISO 8601 格式；只重新打包时保留原编译时间。同版本重建覆盖该版本包，升级后保留旧版本；验证失败不更新 latest。从插件目录访问为 `../../dist/`；独立检出时默认输出到仓库上一级的 `dist/`，也可通过 `MRM_DIST_DIR` 指定目录。包包含 `lib/`、类型声明、`cordis.patch.yml`、目录选择适配脚本、README、docs 和 LICENSE；不包含源码测试目录、工作区本地链接或 `node_modules/`。
 
 仅文档变更且运行产物已同步时，可以直接运行 `pnpm test:pack`。功能变更需先构建再测试。包内容检查不能代替功能验证。
 
 ```powershell
-tar -tzf .\dist\dsh-multi-git-repo-manager-0.1.4.tgz
-Get-Content -LiteralPath .\dist\dsh-multi-git-repo-manager-0.1.4.tgz.sha256
+tar -tzf ..\..\dist\latest\dsh-multi-git-repo-manager.tgz
+Get-Content -LiteralPath ..\..\dist\latest\dsh-multi-git-repo-manager.tgz.sha256
+Get-Content -LiteralPath ..\..\dist\latest\dsh-multi-git-repo-manager.json
 ```
 
 ## 3. 公开源码的产物策略
@@ -54,10 +55,10 @@ Get-Content -LiteralPath .\dist\dsh-multi-git-repo-manager-0.1.4.tgz.sha256
 
 1. 标签使用 `v0.1.4`，目标为已推送并包含对应代码的提交。
 2. 标题使用版本号，正文参考 [对应版本说明](releases/version.md#v014)，保留真实测试环境和未验证项目。
-3. 上传 tgz 和 `.sha256`，核对包版本、标签、文件名和校验值一致。
+3. 选取 latest 索引对应的包，按上表的 Release 资产名重命名为带版本的 tgz，并生成文件名对应的 `.sha256` 后上传；核对包版本、标签、资产名和校验值一致。本地 latest 固定文件名与 Release 资产名分别维护。
 4. 发布后确认固定版本下载地址可访问，再提供 URL 安装说明或提交市场模板。
 
-后续公开功能版本应递增，并同步消费者精确依赖、锁文件、安装说明与市场 URL。不要用相同公开标签反复覆盖不同功能产物。同版本的本地调试可采用含构建摘要的不同文件名，不能用版本显示代替实际文件校验。
+后续公开功能版本应递增，并同步消费者精确依赖、锁文件、安装说明与市场 URL。不要用相同公开标签反复覆盖不同功能产物。同版本的本地调试覆盖固定版本包，安装时强制刷新本地包缓存，并校验安装产物字节。
 
 ## 5. 管理插件与消费者的交付顺序
 
